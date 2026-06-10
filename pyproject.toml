@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mailtm-client"
+version = "0.1.0"
+description = "A robust Python client for the MailTM API"
+readme = "README.md"
+authors = [
+    {name = "YourName", email = "your.email@example.com"}
+]
+keywords = ["mailtm", "disposable-email", "api-client", "automation"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "requests>=2.28.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/mailtm-client"
+"Bug Tracker" = "https://github.com/yourusername/mailtm-client/issues"
