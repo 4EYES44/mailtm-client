@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mailtm-client"
+name = "mailtm-client-wrapper"
 version = "0.1.0"
 description = "A robust Python client for the MailTM API"
 readme = "README.md"
@@ -17,9 +17,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "build>=1.5.0",
     "requests>=2.28.0",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/mailtm-client"
-"Bug Tracker" = "https://github.com/yourusername/mailtm-client/issues"
+"Homepage" = "https://github.com/yourusername/mailtm-client-wrapper"
+"Bug Tracker" = "https://github.com/yourusername/mailtm-client-wrapper/issues"

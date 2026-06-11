@@ -1,4 +1,4 @@
-# MailTM Client
+# MailTM Client Wrapper
 
 A lightweight, robust, and easy-to-use Python client for the [MailTM API](https://docs.mail.tm/). This library is designed for automation tasks that require disposable email addresses and OTP verification.
 
@@ -17,19 +17,19 @@ A lightweight, robust, and easy-to-use Python client for the [MailTM API](https:
 You can install it via pip (once published):
 
 ```bash
-pip install mailtm-client
+pip install mailtm-client-wrapper
 ```
 
 Or directly from GitHub:
 
 ```bash
-pip install git+https://github.com/yourusername/mailtm-client.git
+pip install git+https://github.com/yourusername/mailtm-client-wrapper.git
 ```
 
 ## Quick Start
 
 ```python
-from mailtm_client import MailTMClient
+from mailtm_client_wrapper import MailTMClient
 
 # 1. Initialize client
 client = MailTMClient()

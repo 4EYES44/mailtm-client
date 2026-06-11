@@ -1,5 +1,5 @@
 import pytest
-from mailtm_client import MailTMClient
+from mailtm_client_wrapper import MailTMClient
 
 def test_client_init():
     """Test that the client initializes correctly."""
