@@ -41,14 +41,21 @@ def require_keys(
     *,
     body: object | None = None,
 ) -> None:
-    """Raise if any key is absent, naming that key and chaining the cause."""
+    """Raise if the value is not an object or any key is absent.
+
+    A non-object is reported as such. A missing key names that key and chains
+    the ``KeyError``.
+    """
     error_body = payload if body is None else body
+    if not isinstance(payload, dict):
+        raise MailTMResponseError(
+            "Response item is not an object.",
+            body=error_body,
+        ) from TypeError("item")
     for key in keys:
         try:
-            if not isinstance(payload, dict):
-                raise TypeError(key)
             payload[key]
-        except (KeyError, TypeError) as exc:
+        except KeyError as exc:
             raise MailTMResponseError(
                 f"Response is missing {key}.",
                 body=error_body,

@@ -29,7 +29,7 @@ def test_login_names_a_missing_token_and_chains_the_key_error(mocked_responses):
 
 
 def test_domain_lookup_rejects_a_non_dict_item(mocked_responses):
-    """A domain entry that is not an object is a response error naming domain."""
+    """A domain entry that is not an object is a response error, not a missing key."""
     payload = {
         "hydra:member": [
             "example.com",
@@ -37,12 +37,16 @@ def test_domain_lookup_rejects_a_non_dict_item(mocked_responses):
         ]
     }
     mocked_responses.add(responses.GET, f"{BASE_URL}/domains", json=payload, status=200)
+    client = MailTMClient()
 
-    with pytest.raises(MailTMResponseError, match=r"\bdomain\b") as caught:
-        MailTMClient().get_domain()
+    with pytest.raises(MailTMResponseError, match="not an object") as caught:
+        client.get_domain()
 
+    assert "missing" not in str(caught.value)
     assert isinstance(caught.value.__cause__, TypeError)
     assert caught.value.body == payload
+    assert caught.value.status_code is None
+    assert client.domain is None
 
 
 def test_domain_lookup_rejects_a_later_item_missing_domain_before_choosing(mocked_responses):
@@ -170,19 +174,21 @@ def test_missing_or_non_list_member_is_a_response_error(
     assert caught.value.body == payload
 
 
-def test_inbox_item_that_is_not_an_object_names_the_missing_key(
+def test_inbox_rejects_an_item_that_is_not_an_object(
     authenticated_client, mocked_responses
 ):
-    """A hydra:member entry that is not an object still fails as a response error."""
+    """A hydra:member entry that is not an object is not reported as a missing key."""
     payload = {"hydra:member": ["not-an-object"]}
     client = authenticated_client
     mocked_responses.add(responses.GET, f"{BASE_URL}/messages", json=payload, status=200)
 
-    with pytest.raises(MailTMResponseError, match=r"\bid\b") as caught:
+    with pytest.raises(MailTMResponseError, match="not an object") as caught:
         client.read_inbox()
 
+    assert "missing" not in str(caught.value)
     assert isinstance(caught.value.__cause__, TypeError)
     assert caught.value.body == payload
+    assert caught.value.status_code is None
 
 
 def test_inbox_and_message_return_api_dicts_unchanged(authenticated_client, mocked_responses):
