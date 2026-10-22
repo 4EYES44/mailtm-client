@@ -1,6 +1,7 @@
 import secrets
 import string
 from dataclasses import dataclass
+from typing import cast
 
 import requests
 
@@ -8,13 +9,20 @@ from . import _timing
 from .exceptions import (
     MailTMAPIError,
     MailTMAuthError,
-    MailTMError,
     MailTMConnectionError,
+    MailTMError,
     MailTMNotAuthenticatedError,
     MailTMRateLimitError,
     MailTMResponseError,
     MailTMServerError,
     MailTMTimeoutError,
+)
+from .models import Message, MessageSummary
+from .validation import (
+    MESSAGE_DETAIL_KEYS,
+    MESSAGE_SUMMARY_KEYS,
+    require_keys,
+    require_member_list,
 )
 
 
@@ -109,6 +117,18 @@ def _error_for_status(response: requests.Response) -> MailTMAPIError:
     if status_code >= 500:
         return MailTMServerError(message, status_code=status_code, body=body)
     return MailTMAPIError(message, status_code=status_code, body=body)
+
+
+def _is_active_public_domain(domain_item: dict[str, object]) -> bool:
+    return domain_item.get("isActive") is True and domain_item.get("isPrivate") is False
+
+
+def _reported_inbox_total(payload: dict[str, object]) -> int | None:
+    """hydra:totalItems when it is a non-negative integer. Booleans and other JSON are not."""
+    total = payload.get("hydra:totalItems")
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        return None
+    return total
 
 
 def _json_object(response: requests.Response, operation: str) -> dict[str, object]:
@@ -222,13 +242,17 @@ class MailTMClient:
         return _json_object(response, f"{method} {path}")
 
     def get_domain(self, *, timeout: _Timeout | None = None) -> str:
-        """Fetch an available domain from the MailTR API."""
+        """Fetch the first active, public domain from the first page."""
         payload = self._read_json("GET", "/domains", timeout=timeout)
-        domains = payload.get("hydra:member", [])
-        if not domains:
-            raise MailTMResponseError("No available domains found.", body=payload)
-        self.domain = domains[0]["domain"]
-        return self.domain
+        domains = require_member_list(payload)
+        for domain_item in domains:
+            if not isinstance(domain_item, dict) or not _is_active_public_domain(domain_item):
+                continue
+            require_keys(domain_item, ("domain",), body=payload)
+            domain = domain_item["domain"]
+            self.domain = domain
+            return domain
+        raise MailTMResponseError("No available domains found.", body=payload)
 
     def create_account(
         self,
@@ -262,30 +286,58 @@ class MailTMClient:
             json={"address": email_address, "password": password},
             timeout=timeout,
         )
-        token = payload.get("token")
-        if not isinstance(token, str) or not token:
-            raise MailTMResponseError("Response is missing token.", body=payload)
+        require_keys(payload, ("token",))
+        token = payload["token"]
         self.token = token
         self.session.headers.update({"Authorization": f"Bearer {token}"})
         return token
 
-    def read_inbox(self, *, timeout: _Timeout | None = None) -> list[dict[str, object]]:
-        """Fetch the list of messages in the inbox."""
+    def read_inbox(self, *, timeout: _Timeout | None = None) -> list[MessageSummary]:
+        """Fetch every message in the inbox, across all pages."""
         timeout = self._effective_timeout(timeout)
         self._require_login()
-        payload = self._read_json("GET", "/messages", timeout=timeout)
-        return payload.get("hydra:member", [])
+        return self._read_inbox_pages(timeout)
+
+    def _read_inbox_pages(self, timeout: _Timeout) -> list[MessageSummary]:
+        collected: list[MessageSummary] = []
+        seen_ids: set[object] = set()
+        page = 1
+        while True:
+            payload = self._read_json(
+                "GET", "/messages", params={"page": page}, timeout=timeout
+            )
+            messages = require_member_list(payload)
+            if not messages:
+                break
+            new_ids = 0
+            for message in messages:
+                require_keys(message, MESSAGE_SUMMARY_KEYS, body=payload)
+                summary = cast(MessageSummary, message)
+                if summary["id"] in seen_ids:
+                    continue
+                seen_ids.add(summary["id"])
+                collected.append(summary)
+                new_ids += 1
+            if new_ids == 0:
+                break
+            total = _reported_inbox_total(payload)
+            if total is not None and len(collected) >= total:
+                break
+            page += 1
+        return collected
 
     def read_message(
         self,
         message_id: str,
         *,
         timeout: _Timeout | None = None,
-    ) -> dict[str, object]:
+    ) -> Message:
         """Fetch the full content of a specific message."""
         timeout = self._effective_timeout(timeout)
         self._require_login()
-        return self._read_json("GET", f"/messages/{message_id}", timeout=timeout)
+        payload = self._read_json("GET", f"/messages/{message_id}", timeout=timeout)
+        require_keys(payload, MESSAGE_DETAIL_KEYS)
+        return payload
 
     def _require_login(self) -> None:
         if not self.token:

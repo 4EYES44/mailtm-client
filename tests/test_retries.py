@@ -103,7 +103,11 @@ def _client(mocked_responses, *, authenticated: bool) -> MailTMClient:
 
 def _calls_for(mocked_responses, path: str) -> list:
     url = f"{BASE_URL}{path}"
-    return [call for call in mocked_responses.calls if call.request.url == url]
+    return [
+        call
+        for call in mocked_responses.calls
+        if call.request.url == url or call.request.url.startswith(f"{url}?")
+    ]
 
 
 def _add_failure(mocked_responses, http_method: str, path: str, failure: str) -> None:

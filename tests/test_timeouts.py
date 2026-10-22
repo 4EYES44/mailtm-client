@@ -66,7 +66,7 @@ def _recorded_timeout(mocked_responses, path: str):
     recorded = [
         call.request.req_kwargs["timeout"]
         for call in mocked_responses.calls
-        if call.request.url == url
+        if call.request.url.split("?", 1)[0] == url
     ]
     assert recorded
     return recorded[-1]
