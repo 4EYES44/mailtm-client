@@ -13,8 +13,11 @@ class MailTMConnectionError(MailTMError):
     """The request never produced an HTTP response."""
 
 
-class MailTMAPIError(MailTMError):
-    """The server answered with a non-2xx status."""
+class _ResponseDetails:
+    """HTTP status and body shared by API errors and response errors."""
+
+    status_code: int | None
+    body: object
 
     def __init__(
         self,
@@ -26,6 +29,10 @@ class MailTMAPIError(MailTMError):
         super().__init__(message)
         self.status_code = status_code
         self.body = body
+
+
+class MailTMAPIError(_ResponseDetails, MailTMError):
+    """The server answered with a non-2xx status."""
 
 
 class MailTMAuthError(MailTMAPIError):
@@ -55,19 +62,8 @@ class MailTMServerError(MailTMAPIError):
     """The server answered with a 5xx status."""
 
 
-class MailTMResponseError(MailTMError):
+class MailTMResponseError(_ResponseDetails, MailTMError):
     """A 2xx body was not usable JSON."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        status_code: int | None = None,
-        body: object = None,
-    ) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.body = body
 
 
 class MailTMWaitTimeoutError(MailTMError):
