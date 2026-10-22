@@ -1,9 +1,11 @@
 import secrets
 import string
+from collections.abc import Callable, Collection
 from typing import cast
 
 import requests
 
+from . import _timing
 from .exceptions import (
     MailTMAPIError,
     MailTMAuthError,
@@ -13,6 +15,7 @@ from .exceptions import (
     MailTMResponseError,
     MailTMServerError,
     MailTMTimeoutError,
+    MailTMWaitTimeoutError,
 )
 from .models import Message, MessageSummary
 from .validation import (
@@ -26,6 +29,17 @@ from .validation import (
 type _Timeout = int | float | tuple[int | float, int | float]
 
 _TIMEOUT_ERROR = "timeout must be a positive number of seconds or a (connect, read) pair"
+
+
+def _positive_duration(value: object, name: str) -> int | float:
+    message = f"{name} must be a positive number of seconds"
+    if value is None:
+        raise ValueError(message)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(message)
+    if value <= 0:
+        raise ValueError(message)
+    return value
 
 
 def _positive_seconds(value: object) -> None:
@@ -261,6 +275,50 @@ class MailTMClient:
         payload = self._read_json("GET", f"/messages/{message_id}", timeout=timeout)
         require_keys(payload, MESSAGE_DETAIL_KEYS)
         return payload
+
+    def wait_for_message(
+        self,
+        predicate: Callable[[MessageSummary], object] | None = None,
+        *,
+        timeout: int | float = 60.0,
+        poll_interval: int | float = 3.0,
+        exclude_ids: Collection[str] = (),
+    ) -> Message:
+        """Poll the inbox until a matching message arrives and return it in full.
+
+        ``predicate`` receives each inbox summary (``from``, ``subject``,
+        ``intro``). ``None`` accepts any message that is not listed in
+        ``exclude_ids``. Messages already in the inbox are candidates. The
+        first poll is immediate. Between polls the wait sleeps the smaller of
+        ``poll_interval`` and the time remaining, then polls once more at the
+        deadline. If nothing matched, this raises ``MailTMWaitTimeoutError``
+        with ``timeout`` set to the wait timeout.
+
+        The deadline is checked only between polls. Each poll keeps its own
+        request timeout and retries, which are not shortened to the time left.
+        During an outage the wait can therefore run past its deadline by up to
+        one call's worst case (three attempts of the request timeout plus the
+        retry sleeps; about 33 seconds with the defaults).
+        """
+        timeout = _positive_duration(timeout, "timeout")
+        poll_interval = _positive_duration(poll_interval, "poll_interval")
+        self._require_login()
+        excluded = set(exclude_ids)
+        deadline = _timing.monotonic() + timeout
+        while True:
+            for summary in self.read_inbox():
+                if summary["id"] in excluded:
+                    continue
+                if predicate is not None and not predicate(summary):
+                    continue
+                return self.read_message(summary["id"])
+            remaining = deadline - _timing.monotonic()
+            if remaining <= 0:
+                raise MailTMWaitTimeoutError(
+                    f"No matching message arrived within {timeout} seconds",
+                    timeout=timeout,
+                )
+            _timing.sleep(min(poll_interval, remaining))
 
     def _require_login(self) -> None:
         if not self.token:
