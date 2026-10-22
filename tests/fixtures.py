@@ -7,6 +7,8 @@ use the shapes recorded in the API research notes. No populated message was
 captured, so the message bodies are examples of those shapes, not live payloads.
 """
 
+BASE_URL = "https://api.mail.tm"
+
 DOMAIN = {
     "@id": "/domains/000000000000000000000001",
     "@type": "Domain",

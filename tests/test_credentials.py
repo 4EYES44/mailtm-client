@@ -3,7 +3,7 @@ import string
 
 import responses
 
-from fixtures import DOMAIN_COLLECTION
+from fixtures import BASE_URL, DOMAIN_COLLECTION
 from mailtm_client_wrapper import MailTMClient
 
 LOCAL_PART_CHARACTERS = string.ascii_lowercase + string.digits
@@ -13,7 +13,7 @@ PASSWORD_CHARACTERS = string.ascii_letters + string.digits
 def _stub_domain_lookup(mocked_responses) -> None:
     mocked_responses.add(
         responses.GET,
-        "https://api.mail.tm/domains",
+        f"{BASE_URL}/domains",
         json=DOMAIN_COLLECTION,
         status=200,
     )
@@ -61,7 +61,7 @@ def test_address_uses_the_looked_up_domain_when_none_is_set(mocked_responses):
 
     assert email.endswith("@example.com")
     assert [(call.request.method, call.request.url) for call in mocked_responses.calls] == [
-        ("GET", "https://api.mail.tm/domains")
+        ("GET", f"{BASE_URL}/domains")
     ]
 
 

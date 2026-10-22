@@ -6,6 +6,7 @@ import responses
 
 from fixtures import (
     ACCOUNT,
+    BASE_URL,
     DOMAIN_COLLECTION,
     ERROR_401,
     ERROR_422,
@@ -24,8 +25,6 @@ from mailtm_client_wrapper import (
     MailTMTimeoutError,
     RetryPolicy,
 )
-
-BASE_URL = "https://api.mail.tm"
 
 
 def test_rate_limit_then_success_sleeps_once_for_the_backoff_delay(
@@ -93,14 +92,6 @@ SUCCESS = {
 }
 
 
-def _client(mocked_responses, *, authenticated: bool) -> MailTMClient:
-    client = MailTMClient()
-    if authenticated:
-        mocked_responses.add(responses.POST, f"{BASE_URL}/token", json=TOKEN, status=200)
-        client.login("user@example.com", "password")
-    return client
-
-
 def _calls_for(mocked_responses, path: str) -> list:
     url = f"{BASE_URL}{path}"
     return [
@@ -131,6 +122,7 @@ def _add_failure(mocked_responses, http_method: str, path: str, failure: str) ->
 def test_transient_failure_is_retried_and_then_succeeds(
     fake_clock,
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -141,7 +133,7 @@ def test_transient_failure_is_retried_and_then_succeeds(
     """Timeouts, connection errors, 429 and 5xx are tried again and can then succeed."""
     fake_clock.jitter = 0.0
     body, expected = SUCCESS[method_name]
-    client = _client(mocked_responses, authenticated=authenticated)
+    client = log_in() if authenticated else MailTMClient()
     _add_failure(mocked_responses, http_method, path, failure)
     mocked_responses.add(http_method, f"{BASE_URL}{path}", json=body, status=200)
 
@@ -165,6 +157,7 @@ PERMANENT_FAILURES = [
 def test_auth_client_and_response_errors_are_not_retried(
     fake_clock,
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -175,7 +168,7 @@ def test_auth_client_and_response_errors_are_not_retried(
     error_type,
 ):
     """401, other 4xx and a bad 2xx body fail on the first request without sleeping."""
-    client = _client(mocked_responses, authenticated=authenticated)
+    client = log_in() if authenticated else MailTMClient()
     url = f"{BASE_URL}{path}"
     if status == 200:
         mocked_responses.add(

@@ -5,19 +5,11 @@ from typing import get_type_hints
 import pytest
 import responses
 
-from fixtures import ACCOUNT, MESSAGE_DETAIL, MESSAGE_LIST_ITEM, TOKEN
+from fixtures import ACCOUNT, BASE_URL, MESSAGE_DETAIL, MESSAGE_LIST_ITEM, TOKEN
 from mailtm_client_wrapper import MailTMClient, MailTMResponseError, Message, MessageSummary
 
-BASE_URL = "https://api.mail.tm"
 SUMMARY_KEYS = ("id", "from", "subject", "createdAt", "seen", "hasAttachments")
 DETAIL_KEYS = SUMMARY_KEYS + ("text", "html")
-
-
-def _logged_in_client(mocked_responses) -> MailTMClient:
-    mocked_responses.add(responses.POST, f"{BASE_URL}/token", json=TOKEN, status=200)
-    client = MailTMClient()
-    client.login("user@example.com", "password")
-    return client
 
 
 def test_login_names_a_missing_token_and_chains_the_key_error(mocked_responses):
@@ -83,12 +75,12 @@ def test_domain_lookup_names_a_missing_domain_key(mocked_responses):
 
 
 @pytest.mark.parametrize("missing_key", SUMMARY_KEYS)
-def test_inbox_names_a_missing_summary_key(mocked_responses, missing_key):
+def test_inbox_names_a_missing_summary_key(authenticated_client, mocked_responses, missing_key):
     """Each inbox item must include the summary keys the caller can rely on."""
     item = dict(MESSAGE_LIST_ITEM)
     del item[missing_key]
     payload = {"hydra:member": [item]}
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
     mocked_responses.add(responses.GET, f"{BASE_URL}/messages", json=payload, status=200)
 
     with pytest.raises(MailTMResponseError, match=rf"\b{missing_key}\b") as caught:
@@ -99,12 +91,12 @@ def test_inbox_names_a_missing_summary_key(mocked_responses, missing_key):
 
 
 @pytest.mark.parametrize("missing_key", DETAIL_KEYS)
-def test_message_names_a_missing_detail_key(mocked_responses, missing_key):
+def test_message_names_a_missing_detail_key(authenticated_client, mocked_responses, missing_key):
     """A message detail must include the summary keys plus text and html."""
     message = dict(MESSAGE_DETAIL)
     message_id = "000000000000000000000003"
     del message[missing_key]
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
     mocked_responses.add(
         responses.GET,
         f"{BASE_URL}/messages/{message_id}",
@@ -136,6 +128,7 @@ def test_message_names_a_missing_detail_key(mocked_responses, missing_key):
 )
 def test_missing_or_non_list_member_is_a_response_error(
     mocked_responses,
+    log_in,
     method_name,
     path,
     args,
@@ -147,7 +140,7 @@ def test_missing_or_non_list_member_is_a_response_error(
     payload = {"hydra:totalItems": 0}
     if members != "missing":
         payload["hydra:member"] = members
-    client = _logged_in_client(mocked_responses) if authenticated else MailTMClient()
+    client = log_in() if authenticated else MailTMClient()
     mocked_responses.add(responses.GET, f"{BASE_URL}{path}", json=payload, status=200)
 
     with pytest.raises(MailTMResponseError, match="hydra:member") as caught:
@@ -157,10 +150,12 @@ def test_missing_or_non_list_member_is_a_response_error(
     assert caught.value.body == payload
 
 
-def test_inbox_item_that_is_not_an_object_names_the_missing_key(mocked_responses):
+def test_inbox_item_that_is_not_an_object_names_the_missing_key(
+    authenticated_client, mocked_responses
+):
     """A hydra:member entry that is not an object still fails as a response error."""
     payload = {"hydra:member": ["not-an-object"]}
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
     mocked_responses.add(responses.GET, f"{BASE_URL}/messages", json=payload, status=200)
 
     with pytest.raises(MailTMResponseError, match=r"\bid\b") as caught:
@@ -170,7 +165,7 @@ def test_inbox_item_that_is_not_an_object_names_the_missing_key(mocked_responses
     assert caught.value.body == payload
 
 
-def test_inbox_and_message_return_api_dicts_unchanged(mocked_responses):
+def test_inbox_and_message_return_api_dicts_unchanged(authenticated_client, mocked_responses):
     """Unknown keys, html lists and timestamp strings come back exactly as sent."""
     summary = dict(MESSAGE_LIST_ITEM)
     del summary["intro"]
@@ -181,7 +176,7 @@ def test_inbox_and_message_return_api_dicts_unchanged(mocked_responses):
     second["vendor"] = "kept"
     detail = dict(MESSAGE_DETAIL)
     detail["vendor"] = "kept"
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
     mocked_responses.add(
         responses.GET,
         f"{BASE_URL}/messages",
@@ -199,14 +194,16 @@ def test_inbox_and_message_return_api_dicts_unchanged(mocked_responses):
     assert client.read_message(summary["id"]) == detail
 
 
-def test_inbox_rejects_a_later_item_missing_a_required_key(mocked_responses):
+def test_inbox_rejects_a_later_item_missing_a_required_key(
+    authenticated_client, mocked_responses
+):
     """A valid first message does not hide a later item that lacks a required key."""
     first = dict(MESSAGE_LIST_ITEM)
     second = dict(MESSAGE_LIST_ITEM)
     second["id"] = "000000000000000000000004"
     del second["seen"]
     payload = {"hydra:member": [first, second]}
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
     mocked_responses.add(responses.GET, f"{BASE_URL}/messages", json=payload, status=200)
 
     with pytest.raises(MailTMResponseError, match=r"\bseen\b") as caught:
@@ -216,9 +213,9 @@ def test_inbox_rejects_a_later_item_missing_a_required_key(mocked_responses):
     assert caught.value.body == payload
 
 
-def test_empty_inbox_is_an_empty_list(mocked_responses):
+def test_empty_inbox_is_an_empty_list(authenticated_client, mocked_responses):
     """A present empty hydra:member list is an empty inbox, not an error."""
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
     mocked_responses.add(
         responses.GET,
         f"{BASE_URL}/messages",

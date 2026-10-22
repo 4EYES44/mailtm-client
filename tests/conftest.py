@@ -1,7 +1,8 @@
 import pytest
 import responses
 
-from mailtm_client_wrapper import _timing
+from fixtures import BASE_URL, TOKEN
+from mailtm_client_wrapper import MailTMClient, _timing
 
 
 class FakeClock:
@@ -37,6 +38,28 @@ def fake_clock(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) 
     monkeypatch.setattr(_timing, "monotonic", clock.monotonic)
     monkeypatch.setattr(_timing, "jitter_fraction", clock.jitter_fraction)
     return clock
+
+
+def _login(mocked_responses, client: MailTMClient) -> MailTMClient:
+    mocked_responses.add(responses.POST, f"{BASE_URL}/token", json=TOKEN, status=200)
+    client.login("user@example.com", "password")
+    return client
+
+
+@pytest.fixture
+def authenticated_client(mocked_responses) -> MailTMClient:
+    """A client that has already called login()."""
+    return _login(mocked_responses, MailTMClient())
+
+
+@pytest.fixture
+def log_in(mocked_responses):
+    """Log in a client, creating a default one when the test does not pass one."""
+
+    def _log_in(client: MailTMClient | None = None) -> MailTMClient:
+        return _login(mocked_responses, MailTMClient() if client is None else client)
+
+    return _log_in
 
 
 @pytest.fixture(autouse=True)

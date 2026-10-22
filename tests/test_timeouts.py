@@ -5,15 +5,20 @@ import requests
 import responses
 import urllib3
 
-from fixtures import ACCOUNT, DOMAIN_COLLECTION, MESSAGE_DETAIL, MESSAGE_LIST_ITEM, TOKEN
+from fixtures import (
+    ACCOUNT,
+    BASE_URL,
+    DOMAIN_COLLECTION,
+    MESSAGE_DETAIL,
+    MESSAGE_LIST_ITEM,
+    TOKEN,
+)
 from mailtm_client_wrapper import (
     MailTMClient,
     MailTMConnectionError,
     MailTMTimeoutError,
     RetryPolicy,
 )
-
-BASE_URL = "https://api.mail.tm"
 
 INBOX = {
     "hydra:totalItems": 1,
@@ -51,12 +56,6 @@ NETWORK_CALLS = [
 ]
 
 
-def _prepare(mocked_responses, client: MailTMClient, *, authenticated: bool) -> None:
-    if authenticated:
-        mocked_responses.add(responses.POST, f"{BASE_URL}/token", json=TOKEN, status=200)
-        client.login("user@example.com", "password")
-
-
 _OMITTED = object()
 
 
@@ -84,6 +83,7 @@ def _recorded_timeout(mocked_responses, path: str):
 )
 def test_network_calls_use_the_ten_second_default_timeout(
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -93,7 +93,8 @@ def test_network_calls_use_the_ten_second_default_timeout(
 ):
     """A client constructed without a timeout gives every network call 10 seconds."""
     client = MailTMClient()
-    _prepare(mocked_responses, client, authenticated=authenticated)
+    if authenticated:
+        log_in(client)
     mocked_responses.add(http_method, f"{BASE_URL}{path}", json=body, status=200)
 
     getattr(client, method_name)(*args)
@@ -107,6 +108,7 @@ def test_network_calls_use_the_ten_second_default_timeout(
 )
 def test_client_timeout_is_sent_on_every_network_call(
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -116,7 +118,8 @@ def test_client_timeout_is_sent_on_every_network_call(
 ):
     """The timeout given to the client is the one every later call uses."""
     client = MailTMClient(timeout=4.5)
-    _prepare(mocked_responses, client, authenticated=authenticated)
+    if authenticated:
+        log_in(client)
     mocked_responses.add(http_method, f"{BASE_URL}{path}", json=body, status=200)
 
     getattr(client, method_name)(*args)
@@ -130,6 +133,7 @@ def test_client_timeout_is_sent_on_every_network_call(
 )
 def test_per_call_timeout_overrides_only_that_call(
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -139,7 +143,8 @@ def test_per_call_timeout_overrides_only_that_call(
 ):
     """timeout= on one call replaces the client value; omitting it or passing None does not."""
     client = MailTMClient(timeout=4.5)
-    _prepare(mocked_responses, client, authenticated=authenticated)
+    if authenticated:
+        log_in(client)
     for _ in range(3):
         mocked_responses.add(http_method, f"{BASE_URL}{path}", json=body, status=200)
 
@@ -267,6 +272,7 @@ def test_each_call_rejects_an_invalid_timeout_before_requesting(
 )
 def test_read_and_connect_timeouts_name_the_operation_and_value(
     mocked_responses,
+    log_in,
     transport_error,
     method_name,
     http_method,
@@ -277,7 +283,8 @@ def test_read_and_connect_timeouts_name_the_operation_and_value(
 ):
     """Both phases of a timeout raise one error naming the call and the allowed time."""
     client = MailTMClient(timeout=6.5)
-    _prepare(mocked_responses, client, authenticated=authenticated)
+    if authenticated:
+        log_in(client)
     mocked_responses.add(http_method, f"{BASE_URL}{path}", body=transport_error)
 
     with pytest.raises(MailTMTimeoutError) as caught:

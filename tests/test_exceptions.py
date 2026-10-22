@@ -15,9 +15,7 @@ from mailtm_client_wrapper import (
     MailTMTimeoutError,
     MailTMWaitTimeoutError,
 )
-from fixtures import ERROR_401, ERROR_404, ERROR_422, TOKEN
-
-BASE_URL = "https://api.mail.tm"
+from fixtures import BASE_URL, ERROR_401, ERROR_404, ERROR_422
 
 
 def test_library_errors_share_one_root_and_keep_their_branches():
@@ -59,14 +57,6 @@ STATUS_ERRORS = [
 ]
 
 
-def _client(mocked_responses, *, authenticated: bool) -> MailTMClient:
-    client = MailTMClient()
-    if authenticated:
-        mocked_responses.add(responses.POST, f"{BASE_URL}/token", json=TOKEN, status=200)
-        client.login("user@example.com", "password")
-    return client
-
-
 @pytest.mark.parametrize(
     ("method_name", "http_method", "path", "args", "authenticated"),
     OPERATIONS,
@@ -74,6 +64,7 @@ def _client(mocked_responses, *, authenticated: bool) -> MailTMClient:
 @pytest.mark.parametrize(("status", "body", "error_type"), STATUS_ERRORS)
 def test_each_call_maps_http_status_to_its_error(
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -84,7 +75,7 @@ def test_each_call_maps_http_status_to_its_error(
     error_type,
 ):
     """401, 429, 5xx and other 4xx on every call keep their class, status and body."""
-    client = _client(mocked_responses, authenticated=authenticated)
+    client = log_in() if authenticated else MailTMClient()
     mocked_responses.add(http_method, f"{BASE_URL}{path}", json=body, status=status)
 
     with pytest.raises(error_type) as caught:
@@ -106,6 +97,7 @@ def test_each_call_maps_http_status_to_its_error(
 @pytest.mark.parametrize("raw_body", ["not-json", "", "[]", "null"])
 def test_success_status_with_unusable_body_raises_response_error(
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -114,7 +106,7 @@ def test_success_status_with_unusable_body_raises_response_error(
     raw_body,
 ):
     """A 2xx body that is not a JSON object is a response error, not an API error."""
-    client = _client(mocked_responses, authenticated=authenticated)
+    client = log_in() if authenticated else MailTMClient()
     mocked_responses.add(
         http_method,
         f"{BASE_URL}{path}",
@@ -150,6 +142,7 @@ TRANSPORT_FAILURES = [
 @pytest.mark.parametrize(("transport_error", "error_type"), TRANSPORT_FAILURES)
 def test_transport_failures_keep_the_requests_cause(
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -159,7 +152,7 @@ def test_transport_failures_keep_the_requests_cause(
     error_type,
 ):
     """A timeout or dropped connection is its own error, chained to the requests exception."""
-    client = _client(mocked_responses, authenticated=authenticated)
+    client = log_in() if authenticated else MailTMClient()
     mocked_responses.add(http_method, f"{BASE_URL}{path}", body=transport_error)
 
     with pytest.raises(error_type) as caught:
@@ -183,6 +176,7 @@ def test_transport_failures_keep_the_requests_cause(
 )
 def test_rate_limit_records_a_numeric_retry_after(
     mocked_responses,
+    log_in,
     method_name,
     http_method,
     path,
@@ -192,7 +186,7 @@ def test_rate_limit_records_a_numeric_retry_after(
     retry_after,
 ):
     """A 429 keeps a numeric Retry-After and ignores a non-numeric one."""
-    client = _client(mocked_responses, authenticated=authenticated)
+    client = log_in() if authenticated else MailTMClient()
     mocked_responses.add(
         http_method,
         f"{BASE_URL}{path}",

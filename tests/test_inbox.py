@@ -4,17 +4,8 @@ import pytest
 import responses
 from responses import matchers
 
-from fixtures import MESSAGE_LIST_ITEM, TOKEN
-from mailtm_client_wrapper import MailTMClient, MailTMServerError
-
-BASE_URL = "https://api.mail.tm"
-
-
-def _logged_in_client(mocked_responses) -> MailTMClient:
-    mocked_responses.add(responses.POST, f"{BASE_URL}/token", json=TOKEN, status=200)
-    client = MailTMClient()
-    client.login("user@example.com", "password")
-    return client
+from fixtures import BASE_URL, MESSAGE_LIST_ITEM
+from mailtm_client_wrapper import MailTMServerError
 
 
 def _summary(message_id: str) -> dict:
@@ -52,7 +43,7 @@ def _message_gets(mocked_responses) -> list:
     ]
 
 
-def test_three_page_inbox_is_returned_in_order(mocked_responses):
+def test_three_page_inbox_is_returned_in_order(authenticated_client, mocked_responses):
     """Pages 1, 2 and 3 come back as one list in server order, each with its own timeout."""
     first = _summary("msg-1")
     second = _summary("msg-2")
@@ -60,7 +51,7 @@ def test_three_page_inbox_is_returned_in_order(mocked_responses):
     _add_page(mocked_responses, 1, [first], total=3)
     _add_page(mocked_responses, 2, [second], total=3)
     _add_page(mocked_responses, 3, [third], total=3)
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
 
     assert client.read_inbox(timeout=3.5) == [first, second, third]
     assert [call.request.url for call in _message_gets(mocked_responses)] == [
@@ -75,24 +66,24 @@ def test_three_page_inbox_is_returned_in_order(mocked_responses):
     ]
 
 
-def test_message_arriving_mid_listing_appears_once(mocked_responses):
+def test_message_arriving_mid_listing_appears_once(authenticated_client, mocked_responses):
     """A message that shifts onto the next page is kept once and does not raise."""
     first = _summary("msg-1")
     shifted = _summary("msg-2")
     arrived = _summary("msg-3")
     _add_page(mocked_responses, 1, [first, shifted], total=3)
     _add_page(mocked_responses, 2, [shifted, arrived], total=3)
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
 
     assert client.read_inbox() == [first, shifted, arrived]
 
 
-def test_paging_stops_on_an_empty_page(mocked_responses):
+def test_paging_stops_on_an_empty_page(authenticated_client, mocked_responses):
     """An empty page ends the inbox even when the reported total is still higher."""
     first = _summary("msg-1")
     _add_page(mocked_responses, 1, [first], total=10)
     _add_page(mocked_responses, 2, [], total=10)
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
 
     assert client.read_inbox() == [first]
     assert [call.request.url for call in _message_gets(mocked_responses)] == [
@@ -101,13 +92,13 @@ def test_paging_stops_on_an_empty_page(mocked_responses):
     ]
 
 
-def test_paging_stops_when_a_page_repeats_known_ids(mocked_responses):
+def test_paging_stops_when_a_page_repeats_known_ids(authenticated_client, mocked_responses):
     """A server that ignores page and repeats the same messages does not duplicate or loop."""
     first = _summary("msg-1")
     second = _summary("msg-2")
     _add_page(mocked_responses, 1, [first, second], total=30)
     _add_page(mocked_responses, 2, [first, second], total=30)
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
 
     assert client.read_inbox() == [first, second]
     assert [call.request.url for call in _message_gets(mocked_responses)] == [
@@ -123,11 +114,11 @@ def test_paging_stops_when_a_page_repeats_known_ids(mocked_responses):
         (("msg-1",), 0),
     ],
 )
-def test_paging_stops_when_the_reported_total_is_reached(mocked_responses, message_ids, total):
+def test_paging_stops_when_the_reported_total_is_reached(authenticated_client, mocked_responses, message_ids, total):
     """Once the collected count reaches hydra:totalItems, no further page is requested."""
     messages = [_summary(message_id) for message_id in message_ids]
     _add_page(mocked_responses, 1, messages, total=total)
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
 
     assert client.read_inbox() == messages
     assert [call.request.url for call in _message_gets(mocked_responses)] == [
@@ -135,11 +126,11 @@ def test_paging_stops_when_the_reported_total_is_reached(mocked_responses, messa
     ]
 
 
-def test_failure_on_a_later_page_raises_that_error(mocked_responses):
+def test_failure_on_a_later_page_raises_that_error(authenticated_client, mocked_responses):
     """A failed later page raises that error and does not return the earlier messages."""
     _add_page(mocked_responses, 1, [_summary("msg-1")], total=2)
     _add_page(mocked_responses, 2, [], status=503)
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
 
     with pytest.raises(MailTMServerError) as caught:
         client.read_inbox()
@@ -147,26 +138,26 @@ def test_failure_on_a_later_page_raises_that_error(mocked_responses):
     assert caught.value.status_code == 503
 
 
-def test_paging_ignores_a_missing_total_and_hydra_view(mocked_responses):
+def test_paging_ignores_a_missing_total_and_hydra_view(authenticated_client, mocked_responses):
     """Without hydra:view or hydra:totalItems, paging still returns every page."""
     first = _summary("msg-1")
     second = _summary("msg-2")
     _add_page(mocked_responses, 1, [first])
     _add_page(mocked_responses, 2, [second])
     _add_page(mocked_responses, 3, [])
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
 
     assert client.read_inbox() == [first, second]
 
 
 @pytest.mark.parametrize("total", [None, "1", 1.5, True, -1])
-def test_paging_continues_when_the_reported_total_is_not_a_count(mocked_responses, total):
+def test_paging_continues_when_the_reported_total_is_not_a_count(authenticated_client, mocked_responses, total):
     """An unusable hydra:totalItems does not end or crash the listing."""
     first = _summary("msg-1")
     second = _summary("msg-2")
     _add_page(mocked_responses, 1, [first], total=total)
     _add_page(mocked_responses, 2, [second], total=total)
     _add_page(mocked_responses, 3, [], total=total)
-    client = _logged_in_client(mocked_responses)
+    client = authenticated_client
 
     assert client.read_inbox() == [first, second]
