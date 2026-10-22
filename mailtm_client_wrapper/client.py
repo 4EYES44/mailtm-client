@@ -1,4 +1,4 @@
-import random
+import secrets
 import string
 
 import requests
@@ -84,7 +84,7 @@ class MailTMClient:
         if not self.domain:
             self.get_domain()
         
-        local_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+        local_part = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(10))
         email = f"{local_part}@{self.domain}"
-        password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+        password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
         return email, password
