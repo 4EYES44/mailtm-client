@@ -1,7 +1,8 @@
-import requests
 import random
 import string
-from typing import List, Dict, Tuple, Optional
+
+import requests
+
 
 class MailTMClient:
     """
@@ -11,10 +12,10 @@ class MailTMClient:
     def __init__(self, base_url: str = "https://api.mail.tm"):
         self.base_url = base_url
         self.session = requests.Session()
-        self.token: Optional[str] = None
-        self.domain: Optional[str] = None
-        self.email_address: Optional[str] = None
-        self.password: Optional[str] = None
+        self.token: str | None = None
+        self.domain: str | None = None
+        self.email_address: str | None = None
+        self.password: str | None = None
 
     def get_domain(self) -> str:
         """Fetch an available domain from the MailTR API."""
@@ -56,7 +57,7 @@ class MailTMClient:
         except Exception as e:
             raise Exception(f"Login failed: {e}")
 
-    def read_inbox(self) -> List[Dict]:
+    def read_inbox(self) -> list[dict[str, object]]:
         """Fetch the list of messages in the inbox."""
         if not self.token:
             raise Exception("Not authenticated. Call login() first.")
@@ -67,7 +68,7 @@ class MailTMClient:
         except Exception as e:
             raise Exception(f"Failed to fetch inbox: {e}")
 
-    def read_message(self, message_id: str) -> Dict:
+    def read_message(self, message_id: str) -> dict[str, object]:
         """Fetch the full content of a specific message."""
         if not self.token:
             raise Exception("Not authenticated. Call login() first.")
@@ -78,7 +79,7 @@ class MailTMClient:
         except Exception as e:
             raise Exception(f"Failed to fetch message {message_id}: {e}")
 
-    def generate_random_credentials(self) -> Tuple[str, str]:
+    def generate_random_credentials(self) -> tuple[str, str]:
         """Helper to generate a random email and password."""
         if not self.domain:
             self.get_domain()
