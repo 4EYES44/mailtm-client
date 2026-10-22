@@ -343,6 +343,7 @@ class MailTMClient:
         domains = require_member_list(payload)
         for domain_item in domains:
             require_keys(domain_item, ("domain",), body=payload)
+        for domain_item in domains:
             assert isinstance(domain_item, dict)
             if not _is_active_public_domain(domain_item):
                 continue

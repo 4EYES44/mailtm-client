@@ -45,6 +45,26 @@ def test_domain_lookup_rejects_a_non_dict_item(mocked_responses):
     assert caught.value.body == payload
 
 
+def test_domain_lookup_rejects_a_later_item_missing_domain_before_choosing(mocked_responses):
+    """A usable domain does not excuse a later entry that has no domain key."""
+    payload = {
+        "hydra:member": [
+            {"domain": "public.example", "isActive": True, "isPrivate": False},
+            {"id": "2", "isActive": False, "isPrivate": False},
+        ]
+    }
+    mocked_responses.add(responses.GET, f"{BASE_URL}/domains", json=payload, status=200)
+    client = MailTMClient()
+
+    with pytest.raises(MailTMResponseError, match=r"missing domain") as caught:
+        client.get_domain()
+
+    assert isinstance(caught.value.__cause__, KeyError)
+    assert caught.value.body == payload
+    assert caught.value.status_code is None
+    assert client.domain is None
+
+
 def test_domain_lookup_rejects_an_inactive_item_missing_domain(mocked_responses):
     """An item that would be skipped still has to include domain."""
     payload = {
