@@ -1,0 +1,26 @@
+# Changelog
+
+Changes since the previous client in this repository. `pyproject.toml` still declares version `0.1.0`.
+
+## Unreleased
+
+### Breaking
+
+- Library failures are subclasses of `MailTMError`. They used to be a bare `Exception` whose message was `Failed to fetch domain: ...`, `Error creating account: ...`, `Login failed: ...`, `Failed to fetch inbox: ...`, or `Failed to fetch message ...: ...`.
+- Every HTTP call has a request timeout. The default is 10 seconds. `MailTMClient` takes keyword-only `timeout` and `retry`. `None` on the constructor, zero, a negative number, a bool, or a non-number is rejected, so a request cannot wait forever. `get_domain`, `create_account`, `login`, `read_inbox`, `read_message`, and `generate_random_credentials` take the same `timeout` keyword; on those methods `None` means the client timeout.
+- `read_inbox` requests every page and returns one list, in server order, de-duplicated by `id`. It used to send one request and return `hydra:member`, or `[]` when that key was missing. A missing `hydra:member`, a `hydra:member` that is not a list, or a message missing a required key now raises `MailTMResponseError`. If a later page fails after retries, that error is raised and no partial list is returned.
+- `get_domain` reads only the first page and returns the first member whose boolean `isActive` is true and whose boolean `isPrivate` is false. An empty list, or a page with no such member, raises `MailTMResponseError`. It used to return the first member's `domain` whenever the list was non-empty.
+- A 2xx body that is not JSON, is not a JSON object, or omits a required key raises `MailTMResponseError` instead of `KeyError` or a wrapped `Exception`.
+- Transient failures are retried. The default `RetryPolicy` is 3 total attempts, a 1 second base delay, an 8 second cap, and up to 25% added jitter. Timeouts, connection errors, 429, and 5xx are retried on `get_domain`, `login`, `read_inbox`, and `read_message`. Authentication errors, response errors, and other 4xx are not. `create_account` retries only 429. The request timeout applies to each attempt. The last error keeps its type when the attempts are used up. A numeric `Retry-After` on 429 or 503 that is above the delay cap raises `MailTMRateLimitError` immediately when another attempt would otherwise run; on the last attempt a 503 stays `MailTMServerError`.
+- Python 3.12 or newer is required.
+
+### Added
+
+- `wait_for_message(predicate=None, *, timeout=60.0, poll_interval=3.0, exclude_ids=())` polls the full inbox and returns the matching message. `exclude_ids` skips ids the caller already has. The deadline is checked between polls, so an outage can run about 33 seconds past the deadline with the defaults (three 10-second attempts, plus backoff of 1 second and 2 seconds, plus up to 25% jitter on those sleeps). See the limitations in README.md.
+- `extract_between(text, start, end)` returns the trimmed literal span between two markers, or `None` when a marker is missing or the span is empty. For `hello , this is the otp for the email : 1234 , dont share it with anyone`, the markers `the email : ` and ` , dont` return `1234`.
+- `RetryPolicy`, the `MailTMError` hierarchy (`MailTMTimeoutError`, `MailTMConnectionError`, `MailTMAPIError`, `MailTMAuthError`, `MailTMNotAuthenticatedError`, `MailTMRateLimitError`, `MailTMServerError`, `MailTMResponseError`, `MailTMWaitTimeoutError`), and the `MessageSummary` and `Message` typing annotations.
+- An offline pytest suite (`uv run pytest`) and one opt-in live domain lookup (`MAILTM_LIVE=1 uv run pytest -m live`). `pytest` and `responses` are in the `dev` dependency group.
+
+### Changed
+
+- `generate_random_credentials` draws characters with `secrets`. The local part is still 10 characters from `a-z` and `0-9`. The password is still 12 characters from `a-z`, `A-Z`, and `0-9`.
