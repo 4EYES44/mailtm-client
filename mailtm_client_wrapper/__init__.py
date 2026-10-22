@@ -11,6 +11,7 @@ from .exceptions import (
     MailTMTimeoutError,
     MailTMWaitTimeoutError,
 )
+from .extract import extract_between
 
 __all__ = [
     "MailTMClient",
@@ -24,4 +25,5 @@ __all__ = [
     "MailTMServerError",
     "MailTMResponseError",
     "MailTMWaitTimeoutError",
+    "extract_between",
 ]
