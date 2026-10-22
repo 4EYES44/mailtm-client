@@ -396,6 +396,46 @@ def test_http_date_retry_after_is_ignored(fake_clock, mocked_responses, status):
     assert fake_clock.delays == [1.125]
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "error_type"),
+    [
+        ({"max_attempts": 0}, ValueError),
+        ({"max_attempts": -3}, ValueError),
+        ({"max_attempts": True}, TypeError),
+        ({"max_attempts": 1.5}, TypeError),
+        ({"max_attempts": "3"}, TypeError),
+        ({"base_delay": 0}, ValueError),
+        ({"base_delay": -1}, ValueError),
+        ({"base_delay": float("inf")}, ValueError),
+        ({"base_delay": float("nan")}, ValueError),
+        ({"base_delay": True}, TypeError),
+        ({"base_delay": "1"}, TypeError),
+        ({"max_delay": 0}, ValueError),
+        ({"max_delay": float("inf")}, ValueError),
+        ({"max_delay": float("nan")}, ValueError),
+        ({"max_delay": 0.5}, ValueError),
+        ({"base_delay": 4.0, "max_delay": 3.0}, ValueError),
+    ],
+)
+def test_invalid_retry_policy_is_rejected(kwargs, error_type):
+    """A policy with a bad attempt count or a bad delay cannot be given to the client."""
+    with pytest.raises(error_type):
+        MailTMClient(retry=RetryPolicy(**kwargs))
+
+
+def test_retry_cap_equal_to_the_base_delay_is_accepted(mocked_responses):
+    """A cap that matches the base delay is a usable policy."""
+    mocked_responses.add(
+        responses.GET, f"{BASE_URL}/domains", json=DOMAIN_COLLECTION, status=200
+    )
+
+    domain = MailTMClient(
+        retry=RetryPolicy(max_attempts=1, base_delay=2, max_delay=2)
+    ).get_domain()
+
+    assert domain == "example.com"
+
+
 def test_single_attempt_policy_does_not_retry(fake_clock, mocked_responses):
     """RetryPolicy(max_attempts=1) fails on the first response and does not sleep."""
     mocked_responses.add(

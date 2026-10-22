@@ -50,6 +50,21 @@ class RetryPolicy:
     base_delay: float = 1.0
     max_delay: float = 8.0
 
+    def __post_init__(self) -> None:
+        if isinstance(self.max_attempts, bool) or not isinstance(self.max_attempts, int):
+            raise TypeError("max_attempts must be an integer greater than or equal to 1")
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be an integer greater than or equal to 1")
+        for name in ("base_delay", "max_delay"):
+            value = getattr(self, name)
+            message = f"{name} must be a positive finite number of seconds"
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(message)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(message)
+        if self.max_delay < self.base_delay:
+            raise ValueError("max_delay must be greater than or equal to base_delay")
+
 
 def _positive_duration(value: object, name: str) -> int | float:
     message = f"{name} must be a positive number of seconds"
