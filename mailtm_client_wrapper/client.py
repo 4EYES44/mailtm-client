@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import requests
+import urllib3.exceptions
 
 from . import _timing
 from .exceptions import (
@@ -112,6 +113,32 @@ def _retry_after_header(exc: MailTMError) -> int | float | None:
     if response.status_code not in (429, 503):
         return None
     return _retry_after(response)
+
+
+def _is_read_timeout(exc: BaseException) -> bool:
+    """True when a requests error is a read timeout reported as a connection error.
+
+    requests raises ``ConnectionError`` for a timeout while the body is read, and
+    the urllib3 ``ReadTimeoutError`` sits on the cause, the context, or the args.
+    """
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if isinstance(current, urllib3.exceptions.ReadTimeoutError):
+            return True
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None and not current.__suppress_context__:
+            pending.append(current.__context__)
+        for arg in current.args:
+            if isinstance(arg, BaseException):
+                pending.append(arg)
+    return False
 
 
 def _error_for_other_request(exc: requests.RequestException, operation: str) -> MailTMError:
@@ -225,6 +252,10 @@ class MailTMClient:
             # ConnectTimeout subclasses ConnectionError, so it has to be handled first.
             raise MailTMTimeoutError(f"{operation} timed out (timeout={timeout})") from exc
         except requests.ConnectionError as exc:
+            if _is_read_timeout(exc):
+                raise MailTMTimeoutError(
+                    f"{operation} timed out (timeout={timeout})"
+                ) from exc
             raise MailTMConnectionError(f"{operation} could not connect") from exc
         except requests.RequestException as exc:
             raise _error_for_other_request(exc, operation) from exc

@@ -3,9 +3,15 @@
 import pytest
 import requests
 import responses
+import urllib3
 
 from fixtures import ACCOUNT, DOMAIN_COLLECTION, MESSAGE_DETAIL, MESSAGE_LIST_ITEM, TOKEN
-from mailtm_client_wrapper import MailTMClient, MailTMConnectionError, MailTMTimeoutError
+from mailtm_client_wrapper import (
+    MailTMClient,
+    MailTMConnectionError,
+    MailTMTimeoutError,
+    RetryPolicy,
+)
 
 BASE_URL = "https://api.mail.tm"
 
@@ -288,6 +294,34 @@ def test_timeout_error_names_the_per_call_value(mocked_responses):
     assert "GET /domains" in str(caught.value)
     assert "timeout=(2, 30)" in str(caught.value)
     assert "6.5" not in str(caught.value)
+    assert caught.value.__cause__ is transport_error
+
+
+def _read_timeout_reported_as_connection_error(*, chained: bool) -> requests.ConnectionError:
+    """Build the ConnectionError requests uses when a socket read times out mid-body."""
+    read_timeout = urllib3.exceptions.ReadTimeoutError(None, "/domains", "Read timed out.")
+    if chained:
+        error = requests.ConnectionError("read timed out")
+        error.__cause__ = read_timeout
+        return error
+    error = requests.ConnectionError(read_timeout)
+    error.__context__ = read_timeout
+    return error
+
+
+@pytest.mark.parametrize("chained", [False, True])
+def test_read_timeout_while_the_body_is_read_is_a_timeout_error(mocked_responses, chained):
+    """A read timeout reported as ConnectionError is a timeout error, naming the call."""
+    transport_error = _read_timeout_reported_as_connection_error(chained=chained)
+    mocked_responses.add(responses.GET, f"{BASE_URL}/domains", body=transport_error)
+
+    with pytest.raises(MailTMTimeoutError) as caught:
+        MailTMClient(timeout=6.5, retry=RetryPolicy(max_attempts=1)).get_domain()
+
+    assert type(caught.value) is MailTMTimeoutError
+    assert not isinstance(caught.value, MailTMConnectionError)
+    assert "GET /domains" in str(caught.value)
+    assert "timeout=6.5" in str(caught.value)
     assert caught.value.__cause__ is transport_error
 
 
