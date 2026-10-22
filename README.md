@@ -31,6 +31,8 @@ for summary in client.read_inbox():
 
 `create_account` returns `True`. `login` returns the `token` value from the response and stores it on the client. `read_inbox` returns a list of message dicts.
 
+Make requests one at a time and wait for each call to finish. See [Be patient](#be-patient).
+
 ## Client
 
 ```text
@@ -179,13 +181,17 @@ MailTMClient(
 )
 ```
 
-`get_domain`, `login`, `read_inbox`, and `read_message` retry `MailTMRateLimitError` (429), `MailTMServerError` (any 5xx), `MailTMTimeoutError`, and `MailTMConnectionError`. They do not retry `MailTMAuthError`, `MailTMResponseError`, or any other 4xx (`MailTMAPIError`, including 404 and 422). `create_account` retries only 429.
+`get_domain`, `login`, `read_inbox`, and `read_message` retry `MailTMRateLimitError` (429), `MailTMServerError` (any 5xx), `MailTMTimeoutError`, and `MailTMConnectionError`. A 503 whose numeric `Retry-After` is above `max_delay` is not retried; that case is described below. They do not retry `MailTMAuthError`, `MailTMResponseError`, or any other 4xx (`MailTMAPIError`, including 404 and 422). `create_account` retries only 429.
 
 The request timeout applies to each attempt. When the attempts are used up, the last error is raised unchanged, with its original type.
 
 After failed attempt `n` (1 for the first failure), if another attempt remains and no `Retry-After` override applies, the sleep is `min(max_delay, base_delay * 2 ** (n - 1))`, plus up to 25% of that delay. The extra fraction is uniform in `[0, 1)` and is only added. With the defaults the sleeps are 1 second and then 2 seconds, each plus that jitter. The third attempt is the last, so there is no third sleep.
 
-On HTTP 429 and 503, a numeric `Retry-After` (seconds) replaces that sleep when it is less than or equal to `max_delay`. No jitter is added on top. When it is greater than `max_delay`, the client does not sleep and raises `MailTMRateLimitError` immediately, on every attempt: `retry_after` is the header value, and a 503 keeps `status_code` 503. `create_account` does not retry 503, so a long `Retry-After` on account creation stays `MailTMServerError`. A `Retry-After` that is not a positive, finite number (an HTTP date, a negative value, zero, `nan`, or infinity) is ignored and the backoff above is used. `retry_after` on the exception is `None` when the header is absent or not usable.
+On HTTP 429 and 503, a numeric `Retry-After` (seconds) replaces that sleep when it is less than or equal to `max_delay`. No jitter is added on top. When it is greater than `max_delay`, the client does not sleep and does not try again. On 429 it raises `MailTMRateLimitError` immediately, on every attempt, with `retry_after` set to that number of seconds. On 503 it raises `MailTMServerError` immediately, on every attempt, including the last attempt and `RetryPolicy(max_attempts=1)`. The status stays 503. `create_account` does not retry 503, so that call is also `MailTMServerError` and does not sleep. A `Retry-After` that is not a positive, finite number (an HTTP date, a negative value, zero, `nan`, or infinity) is ignored and the backoff above is used. On `MailTMRateLimitError`, `retry_after` is `None` when the header is absent or not usable.
+
+## Be patient
+
+Make requests one at a time and wait for each call, including `wait_for_message`, to finish. Do not call the client from several threads or fire many requests at once. Mail.tm limits requests per IP address. Its [docs](https://docs.mail.tm/getting-started/error-handling) say 8 per second, and a 429 means you went over. Going over can get you blocked for a short time. Be patient and let the retries and the poll interval do their job.
 
 ## `extract_between`
 
@@ -232,7 +238,7 @@ MailTMError
 | HTTP 401 | `MailTMAuthError` |
 | `read_inbox`, `read_message`, or `wait_for_message` before `login` | `MailTMNotAuthenticatedError` |
 | HTTP 429 | `MailTMRateLimitError` |
-| HTTP 5xx | `MailTMServerError`. A 503 with a numeric `Retry-After` above `max_delay` is `MailTMRateLimitError` (except on `create_account`, which does not retry 503) |
+| HTTP 5xx | `MailTMServerError`. A numeric `Retry-After` on 503 that is above `max_delay` still raises `MailTMServerError` immediately, with no sleep and no further attempts |
 | Any other non-2xx, including 404 and 422 | `MailTMAPIError` |
 | 2xx body that is not valid JSON, is not a JSON object, lacks `hydra:member` or has one that is not a list, has a member that is not an object or lacks a required key, or is a domain page with no active public domain | `MailTMResponseError` |
 | Wait deadline elapsed | `MailTMWaitTimeoutError` |
