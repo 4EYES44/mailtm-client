@@ -41,7 +41,7 @@ MailTMClient(base_url="https://api.mail.tm", *, timeout=10.0, retry=None)
 
 `timeout` is the per-request timeout passed to `requests`. A single number applies to connect and to each socket read. A pair is `(connect, read)` and is passed through unchanged. The default is `10.0` seconds. On a method, `timeout=None` means "use the client value". On the constructor, `None` is rejected.
 
-These values raise `ValueError`: `None` on the constructor, zero, a negative number, or a pair that contains one of those. These values raise `TypeError`: a bool, a string, a list, a pair of the wrong length, or a pair that contains a bool or a non-number. The same rules apply to a per-call `timeout`, except that omitting it or passing `None` keeps the client value. The invalid value is rejected before any request is sent.
+These values raise `ValueError`: `None` on the constructor, zero, a negative number, `nan`, infinity, or a pair that contains one of those. These values raise `TypeError`: a bool, a string, a list, a pair of the wrong length, or a pair that contains a bool or a non-number. The same rules apply to a per-call `timeout`, except that omitting it or passing `None` keeps the client value. The invalid value is rejected before any request is sent.
 
 Omitting `retry`, or passing `None`, uses a default `RetryPolicy()`. See [Retries](#retries).
 
@@ -130,7 +130,7 @@ Polls `read_inbox` until one summary is accepted, then returns `read_message` fo
 
 The first poll is immediate. After a poll, if the deadline is still ahead, the helper sleeps for the smaller of `poll_interval` and the time remaining, then polls again. That last poll is how a message that arrives at the deadline is still returned. If the deadline has passed and nothing matched, it raises `MailTMWaitTimeoutError`. The exception attribute `timeout` is this wait deadline, not the request timeout. The message is `No matching message arrived within {timeout} seconds`.
 
-`timeout` and `poll_interval` must be positive numbers. `None`, zero, and negative numbers raise `ValueError`. Bools and other non-numbers raise `TypeError`. Those checks happen before any poll.
+`timeout` and `poll_interval` must be positive, finite numbers. `None`, zero, negative numbers, `nan`, and infinity raise `ValueError`. Bools and other non-numbers raise `TypeError`. Those checks happen before any poll.
 
 Any other `MailTMError` from a poll, after that call's own retries, propagates immediately. Calling this before `login` raises `MailTMNotAuthenticatedError` and does not send a request.
 
@@ -167,7 +167,7 @@ client.wait_for_message(
 RetryPolicy(max_attempts=3, base_delay=1.0, max_delay=8.0)
 ```
 
-`RetryPolicy` is a frozen dataclass. `max_attempts` is the total number of attempts, including the first. `RetryPolicy(max_attempts=1)` turns retries off. Pass the policy to the client; there is no per-call retry argument.
+`RetryPolicy` is a frozen dataclass. `max_attempts` is the total number of attempts, including the first, and must be an integer of at least 1. `base_delay` and `max_delay` must be positive, finite numbers, and `max_delay` must be at least `base_delay`. Anything else raises `ValueError` or `TypeError` when the policy is created. `RetryPolicy(max_attempts=1)` turns retries off. Pass the policy to the client; there is no per-call retry argument.
 
 ```python
 from mailtm_client_wrapper import MailTMClient, RetryPolicy
@@ -185,7 +185,7 @@ The request timeout applies to each attempt. When the attempts are used up, the 
 
 After failed attempt `n` (1 for the first failure), if another attempt remains and no `Retry-After` override applies, the sleep is `min(max_delay, base_delay * 2 ** (n - 1))`, plus up to 25% of that delay. The extra fraction is uniform in `[0, 1)` and is only added. With the defaults the sleeps are 1 second and then 2 seconds, each plus that jitter. The third attempt is the last, so there is no third sleep.
 
-On HTTP 429 and 503, a numeric `Retry-After` (seconds) replaces that sleep when it is less than or equal to `max_delay`. No jitter is added on top. When it is greater than `max_delay`, the client does not sleep. If another attempt is still allowed, that 429 or 503 raises `MailTMRateLimitError` immediately: `retry_after` is the header value, and a 503 keeps `status_code` 503. If the failure is already the last attempt, the original error is raised (`MailTMRateLimitError` for 429, `MailTMServerError` for 503). `create_account` does not retry 503, so a long `Retry-After` on account creation stays `MailTMServerError`. A non-numeric `Retry-After`, including an HTTP date, is ignored and the backoff above is used. `retry_after` on the exception is `None` when the header is absent or not numeric.
+On HTTP 429 and 503, a numeric `Retry-After` (seconds) replaces that sleep when it is less than or equal to `max_delay`. No jitter is added on top. When it is greater than `max_delay`, the client does not sleep and raises `MailTMRateLimitError` immediately, on every attempt: `retry_after` is the header value, and a 503 keeps `status_code` 503. `create_account` does not retry 503, so a long `Retry-After` on account creation stays `MailTMServerError`. A `Retry-After` that is not a positive, finite number (an HTTP date, a negative value, zero, `nan`, or infinity) is ignored and the backoff above is used. `retry_after` on the exception is `None` when the header is absent or not usable.
 
 ## `extract_between`
 
@@ -225,12 +225,14 @@ MailTMError
 
 | Situation | Exception |
 | --- | --- |
-| Connect or read timeout | `MailTMTimeoutError` |
-| DNS failure, connection refused, connection reset | `MailTMConnectionError` |
+| Connect timeout, or read timeout (including while the body is being read) | `MailTMTimeoutError` |
+| DNS failure, connection refused, connection reset, a connection broken mid-body (`ChunkedEncodingError`) | `MailTMConnectionError` (retried) |
+| `ContentDecodingError` | `MailTMResponseError` (not retried) |
+| Any other `requests` failure, such as `InvalidURL` or `TooManyRedirects` | `MailTMError` itself, not retried |
 | HTTP 401 | `MailTMAuthError` |
 | `read_inbox`, `read_message`, or `wait_for_message` before `login` | `MailTMNotAuthenticatedError` |
 | HTTP 429 | `MailTMRateLimitError` |
-| HTTP 5xx | `MailTMServerError`. A 503 with a numeric `Retry-After` above `max_delay` is `MailTMRateLimitError` when another attempt is still allowed |
+| HTTP 5xx | `MailTMServerError`. A 503 with a numeric `Retry-After` above `max_delay` is `MailTMRateLimitError` (except on `create_account`, which does not retry 503) |
 | Any other non-2xx, including 404 and 422 | `MailTMAPIError` |
 | 2xx body that is not valid JSON, is not a JSON object, lacks `hydra:member`, or lacks a required key | `MailTMResponseError` |
 | Wait deadline elapsed | `MailTMWaitTimeoutError` |
