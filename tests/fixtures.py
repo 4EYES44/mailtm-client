@@ -137,3 +137,43 @@ ERROR_422 = {
     "type": "/validation_errors/c1051bb4-d103-4f74-8988-acbcafc7fdc3",
     "title": "An error occurred",
 }
+
+
+def _summary(
+    message_id: str,
+    *,
+    subject: str = "Subject",
+    intro: str = "Message preview",
+) -> dict:
+    """One inbox summary, copied from the documented list item."""
+    message = dict(MESSAGE_LIST_ITEM)
+    message["id"] = message_id
+    message["@id"] = f"/messages/{message_id}"
+    message["subject"] = subject
+    message["intro"] = intro
+    return message
+
+
+def _calls_for(mocked_responses, path: str, *, method: str | None = None) -> list:
+    """Recorded calls whose path matches, ignoring a query string."""
+    url = f"{BASE_URL}{path}"
+    return [
+        call
+        for call in mocked_responses.calls
+        if (method is None or call.request.method == method)
+        and (call.request.url == url or call.request.url.startswith(f"{url}?"))
+    ]
+
+
+def _message_gets(mocked_responses) -> list:
+    """Recorded GET /messages calls, including paged URLs."""
+    return _calls_for(mocked_responses, "/messages", method="GET")
+
+
+def _recorded_timeout(mocked_responses, path: str):
+    """The timeout of the last recorded call to path."""
+    recorded = [
+        call.request.req_kwargs["timeout"] for call in _calls_for(mocked_responses, path)
+    ]
+    assert recorded
+    return recorded[-1]

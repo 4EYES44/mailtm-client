@@ -12,6 +12,7 @@ from fixtures import (
     MESSAGE_DETAIL,
     MESSAGE_LIST_ITEM,
     TOKEN,
+    _recorded_timeout,
 )
 from mailtm_client_wrapper import (
     MailTMClient,
@@ -64,17 +65,6 @@ def _call(client: MailTMClient, method_name: str, args: tuple, timeout=_OMITTED)
     if timeout is _OMITTED:
         return method(*args)
     return method(*args, timeout=timeout)
-
-
-def _recorded_timeout(mocked_responses, path: str):
-    url = f"{BASE_URL}{path}"
-    recorded = [
-        call.request.req_kwargs["timeout"]
-        for call in mocked_responses.calls
-        if call.request.url.split("?", 1)[0] == url
-    ]
-    assert recorded
-    return recorded[-1]
 
 
 @pytest.mark.parametrize(

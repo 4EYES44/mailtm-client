@@ -4,15 +4,8 @@ import pytest
 import responses
 from responses import matchers
 
-from fixtures import BASE_URL, MESSAGE_LIST_ITEM
+from fixtures import BASE_URL, _message_gets, _summary
 from mailtm_client_wrapper import MailTMServerError
-
-
-def _summary(message_id: str) -> dict:
-    message = dict(MESSAGE_LIST_ITEM)
-    message["id"] = message_id
-    message["@id"] = f"/messages/{message_id}"
-    return message
 
 
 def _add_page(
@@ -33,14 +26,6 @@ def _add_page(
         status=status,
         match=[matchers.query_param_matcher({"page": page})],
     )
-
-
-def _message_gets(mocked_responses) -> list:
-    return [
-        call
-        for call in mocked_responses.calls
-        if call.request.method == "GET" and call.request.url.split("?")[0] == f"{BASE_URL}/messages"
-    ]
 
 
 def test_three_page_inbox_is_returned_in_order(authenticated_client, mocked_responses):

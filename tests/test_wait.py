@@ -4,7 +4,7 @@ import pytest
 import responses
 from responses import matchers
 
-from fixtures import BASE_URL, MESSAGE_DETAIL, MESSAGE_LIST_ITEM
+from fixtures import BASE_URL, MESSAGE_DETAIL, _summary
 from mailtm_client_wrapper import (
     MailTMClient,
     MailTMNotAuthenticatedError,
@@ -12,15 +12,6 @@ from mailtm_client_wrapper import (
     MailTMWaitTimeoutError,
     RetryPolicy,
 )
-
-
-def _summary(message_id: str, *, subject: str = "Subject", intro: str = "Message preview") -> dict:
-    message = dict(MESSAGE_LIST_ITEM)
-    message["id"] = message_id
-    message["@id"] = f"/messages/{message_id}"
-    message["subject"] = subject
-    message["intro"] = intro
-    return message
 
 
 def _detail(message_id: str) -> dict:
