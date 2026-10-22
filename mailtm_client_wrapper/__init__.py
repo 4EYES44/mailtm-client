@@ -1,4 +1,4 @@
-from .client import MailTMClient
+from .client import MailTMClient, RetryPolicy
 from .exceptions import (
     MailTMAPIError,
     MailTMAuthError,
@@ -15,6 +15,7 @@ from .extract import extract_between
 
 __all__ = [
     "MailTMClient",
+    "RetryPolicy",
     "MailTMError",
     "MailTMTimeoutError",
     "MailTMConnectionError",

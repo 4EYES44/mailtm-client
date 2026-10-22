@@ -1,11 +1,14 @@
 import secrets
 import string
+from dataclasses import dataclass
 
 import requests
 
+from . import _timing
 from .exceptions import (
     MailTMAPIError,
     MailTMAuthError,
+    MailTMError,
     MailTMConnectionError,
     MailTMNotAuthenticatedError,
     MailTMRateLimitError,
@@ -18,6 +21,22 @@ from .exceptions import (
 type _Timeout = int | float | tuple[int | float, int | float]
 
 _TIMEOUT_ERROR = "timeout must be a positive number of seconds or a (connect, read) pair"
+_JITTER_SHARE = 0.25
+_RETRYABLE = (
+    MailTMRateLimitError,
+    MailTMServerError,
+    MailTMTimeoutError,
+    MailTMConnectionError,
+)
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """How many times a call is attempted, and how long to wait between tries."""
+
+    max_attempts: int = 3
+    base_delay: float = 1.0
+    max_delay: float = 8.0
 
 
 def _positive_seconds(value: object) -> None:
@@ -61,6 +80,17 @@ def _retry_after(response: requests.Response) -> int | float | None:
     if seconds.is_integer():
         return int(seconds)
     return seconds
+
+
+def _retry_after_header(exc: MailTMError) -> int | float | None:
+    """Numeric Retry-After on 429 or 503. Anything else, including an HTTP date, is ignored."""
+    cause = exc.__cause__
+    response = getattr(cause, "response", None)
+    if not isinstance(response, requests.Response):
+        return None
+    if response.status_code not in (429, 503):
+        return None
+    return _retry_after(response)
 
 
 def _error_for_status(response: requests.Response) -> MailTMAPIError:
@@ -109,9 +139,11 @@ class MailTMClient:
         base_url: str = "https://api.mail.tm",
         *,
         timeout: _Timeout = 10.0,
+        retry: RetryPolicy | None = None,
     ):
         self.base_url = base_url
         self._timeout = _checked_timeout(timeout)
+        self._retry = retry if retry is not None else RetryPolicy()
         self.session = requests.Session()
         self.token: str | None = None
         self.domain: str | None = None
@@ -123,8 +155,18 @@ class MailTMClient:
             return self._timeout
         return _checked_timeout(timeout)
 
-    def _send(self, method: str, path: str, **kwargs: object) -> requests.Response:
-        timeout = self._effective_timeout(kwargs.pop("timeout", None))
+    def _backoff_delay(self, retry_number: int) -> float:
+        policy = self._retry
+        computed = min(policy.max_delay, policy.base_delay * 2 ** (retry_number - 1))
+        return computed + computed * _JITTER_SHARE * _timing.jitter_fraction()
+
+    def _exchange(
+        self,
+        method: str,
+        path: str,
+        timeout: _Timeout,
+        **kwargs: object,
+    ) -> requests.Response:
         operation = f"{method} {path}"
         try:
             response = self.session.request(
@@ -135,12 +177,45 @@ class MailTMClient:
             raise MailTMTimeoutError(f"{operation} timed out (timeout={timeout})") from exc
         except requests.ConnectionError as exc:
             raise MailTMConnectionError(f"{operation} could not connect") from exc
-
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise _error_for_status(response) from exc
         return response
+
+    def _pause(self, retry_number: int, exc: MailTMError) -> float:
+        override = _retry_after_header(exc)
+        if override is None:
+            return self._backoff_delay(retry_number)
+        if override > self._retry.max_delay:
+            if isinstance(exc, MailTMRateLimitError):
+                raise exc
+            if isinstance(exc, MailTMServerError):
+                raise MailTMRateLimitError(
+                    str(exc),
+                    status_code=exc.status_code,
+                    body=exc.body,
+                    retry_after=override,
+                ) from exc.__cause__
+            raise exc
+        return override
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        retryable: tuple[type[MailTMError], ...] = _RETRYABLE,
+        **kwargs: object,
+    ) -> requests.Response:
+        timeout = self._effective_timeout(kwargs.pop("timeout", None))
+        for attempt in range(1, self._retry.max_attempts + 1):
+            try:
+                return self._exchange(method, path, timeout, **kwargs)
+            except retryable as exc:
+                if attempt >= self._retry.max_attempts:
+                    raise
+                _timing.sleep(self._pause(attempt, exc))
 
     def _read_json(self, method: str, path: str, **kwargs: object) -> dict[str, object]:
         response = self._send(method, path, **kwargs)
@@ -163,11 +238,13 @@ class MailTMClient:
         timeout: _Timeout | None = None,
     ) -> bool:
         """Create a new disposable account."""
+        # A later timeout or 5xx can mean the account already exists, so only 429 is retried.
         self._read_json(
             "POST",
             "/accounts",
             json={"address": email_address, "password": password},
             timeout=timeout,
+            retryable=(MailTMRateLimitError,),
         )
         return True
 

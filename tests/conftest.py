@@ -23,10 +23,16 @@ class FakeClock:
         return self.jitter
 
 
-@pytest.fixture
-def fake_clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
-    """Replace the timing seam with an instant clock for this test."""
+@pytest.fixture(autouse=True)
+def fake_clock(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> FakeClock:
+    """Replace the timing seam with an instant clock.
+
+    Live tests keep the real clock. Every other test records delays here so
+    retries and later wait loops do not sleep for real.
+    """
     clock = FakeClock()
+    if request.node.get_closest_marker("live"):
+        return clock
     monkeypatch.setattr(_timing, "sleep", clock.sleep)
     monkeypatch.setattr(_timing, "monotonic", clock.monotonic)
     monkeypatch.setattr(_timing, "jitter_fraction", clock.jitter_fraction)
