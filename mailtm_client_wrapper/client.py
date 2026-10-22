@@ -107,7 +107,12 @@ def _response_body(response: requests.Response) -> object:
         return response.text
 
 
-def _retry_after(response: requests.Response) -> int | float | None:
+# Only these statuses carry a Retry-After the client will honor.
+_RETRY_AFTER_STATUSES = frozenset({429, 503})
+
+
+def _parse_retry_after(response: requests.Response) -> int | float | None:
+    """A positive finite Retry-After in seconds, or None when the header is not usable."""
     header = response.headers.get("Retry-After")
     if header is None:
         return None
@@ -120,17 +125,6 @@ def _retry_after(response: requests.Response) -> int | float | None:
     if seconds.is_integer():
         return int(seconds)
     return seconds
-
-
-def _retry_after_header(exc: MailTMError) -> int | float | None:
-    """Numeric Retry-After on 429 or 503. Anything else, including an HTTP date, is ignored."""
-    cause = exc.__cause__
-    response = getattr(cause, "response", None)
-    if not isinstance(response, requests.Response):
-        return None
-    if response.status_code not in (429, 503):
-        return None
-    return _retry_after(response)
 
 
 def _is_read_timeout(exc: BaseException) -> bool:
@@ -176,21 +170,29 @@ def _error_for_other_request(exc: requests.RequestException, operation: str) -> 
 
 
 def _error_for_status(response: requests.Response) -> MailTMAPIError:
+    """Map one HTTP status to its library error, parsing Retry-After once."""
     status_code = response.status_code
     body = _response_body(response)
     message = f"Mail.tm returned {status_code}"
+    retry_after = (
+        _parse_retry_after(response) if status_code in _RETRY_AFTER_STATUSES else None
+    )
     if status_code == 401:
-        return MailTMAuthError(message, status_code=status_code, body=body)
-    if status_code == 429:
-        return MailTMRateLimitError(
+        error: MailTMAPIError = MailTMAuthError(message, status_code=status_code, body=body)
+    elif status_code == 429:
+        error = MailTMRateLimitError(
             message,
             status_code=status_code,
             body=body,
-            retry_after=_retry_after(response),
+            retry_after=retry_after,
         )
-    if status_code >= 500:
-        return MailTMServerError(message, status_code=status_code, body=body)
-    return MailTMAPIError(message, status_code=status_code, body=body)
+    elif status_code >= 500:
+        error = MailTMServerError(message, status_code=status_code, body=body)
+    else:
+        error = MailTMAPIError(message, status_code=status_code, body=body)
+    # Private copy so the retry loop does not read the requests response again.
+    setattr(error, "_retry_after", retry_after)
+    return error
 
 
 def _is_active_public_domain(domain_item: dict[str, object]) -> bool:
@@ -254,7 +256,7 @@ class MailTMClient:
         computed = min(policy.max_delay, policy.base_delay * 2 ** (retry_number - 1))
         return computed + computed * _JITTER_SHARE * _timing.jitter_fraction()
 
-    def _exchange(
+    def _request_once(
         self,
         method: str,
         path: str,
@@ -284,34 +286,32 @@ class MailTMClient:
         return response
 
     def _pause(self, retry_number: int, exc: MailTMError) -> float:
-        override = _retry_after_header(exc)
-        if override is None:
+        override = getattr(exc, "_retry_after", None)
+        if not isinstance(override, (int, float)) or isinstance(override, bool):
             return self._backoff_delay(retry_number)
         if override > self._retry.max_delay:
             if isinstance(exc, MailTMRateLimitError):
                 raise exc
-            if isinstance(exc, MailTMServerError):
-                raise MailTMRateLimitError(
-                    str(exc),
-                    status_code=exc.status_code,
-                    body=exc.body,
-                    retry_after=override,
-                ) from exc.__cause__
-            raise exc
+            raise MailTMRateLimitError(
+                str(exc),
+                status_code=exc.status_code,
+                body=exc.body,
+                retry_after=override,
+            ) from exc.__cause__
         return override
 
-    def _send(
+    def _request_with_retries(
         self,
         method: str,
         path: str,
+        timeout: _Timeout,
         *,
         retryable: tuple[type[MailTMError], ...] = _RETRYABLE,
         **kwargs: object,
     ) -> requests.Response:
-        timeout = self._effective_timeout(kwargs.pop("timeout", None))
         for attempt in range(1, self._retry.max_attempts + 1):
             try:
-                return self._exchange(method, path, timeout, **kwargs)
+                return self._request_once(method, path, timeout, **kwargs)
             except retryable as exc:
                 # A Retry-After past the cap raises even on the final attempt,
                 # so a 503 does not change class according to which try it was.
@@ -320,16 +320,30 @@ class MailTMClient:
                     raise
                 _timing.sleep(delay)
 
-    def _read_json(self, method: str, path: str, **kwargs: object) -> dict[str, object]:
-        response = self._send(method, path, **kwargs)
+    def _read_json(
+        self,
+        method: str,
+        path: str,
+        timeout: _Timeout,
+        *,
+        retryable: tuple[type[MailTMError], ...] = _RETRYABLE,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        response = self._request_with_retries(
+            method, path, timeout, retryable=retryable, **kwargs
+        )
         return _json_object(response, f"{method} {path}")
 
     def get_domain(self, *, timeout: _Timeout | None = None) -> str:
         """Fetch the first active, public domain from the first page."""
-        payload = self._read_json("GET", "/domains", timeout=timeout)
+        return self._load_domain(self._effective_timeout(timeout))
+
+    def _load_domain(self, timeout: _Timeout) -> str:
+        payload = self._read_json("GET", "/domains", timeout)
         domains = require_member_list(payload)
         for domain_item in domains:
             require_keys(domain_item, ("domain",), body=payload)
+            assert isinstance(domain_item, dict)
             if not _is_active_public_domain(domain_item):
                 continue
             domain = domain_item["domain"]
@@ -349,8 +363,8 @@ class MailTMClient:
         self._read_json(
             "POST",
             "/accounts",
+            self._effective_timeout(timeout),
             json={"address": email_address, "password": password},
-            timeout=timeout,
             retryable=(MailTMRateLimitError,),
         )
         return True
@@ -366,8 +380,8 @@ class MailTMClient:
         payload = self._read_json(
             "POST",
             "/token",
+            self._effective_timeout(timeout),
             json={"address": email_address, "password": password},
-            timeout=timeout,
         )
         require_keys(payload, ("token",))
         token = payload["token"]
@@ -386,9 +400,7 @@ class MailTMClient:
         seen_ids: set[object] = set()
         page = 1
         while True:
-            payload = self._read_json(
-                "GET", "/messages", params={"page": page}, timeout=timeout
-            )
+            payload = self._read_json("GET", "/messages", timeout, params={"page": page})
             messages = require_member_list(payload)
             if not messages:
                 break
@@ -418,7 +430,7 @@ class MailTMClient:
         """Fetch the full content of a specific message."""
         timeout = self._effective_timeout(timeout)
         self._require_login()
-        payload = self._read_json("GET", f"/messages/{message_id}", timeout=timeout)
+        payload = self._read_json("GET", f"/messages/{message_id}", timeout)
         require_keys(payload, MESSAGE_DETAIL_KEYS)
         return payload
 
@@ -474,7 +486,7 @@ class MailTMClient:
         """Helper to generate a random email and password."""
         timeout = self._effective_timeout(timeout)
         if not self.domain:
-            self.get_domain(timeout=timeout)
+            self._load_domain(timeout)
         
         local_part = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(10))
         email = f"{local_part}@{self.domain}"
