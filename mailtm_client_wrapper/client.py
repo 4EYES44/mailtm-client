@@ -22,6 +22,32 @@ from .validation import (
 )
 
 
+type _Timeout = int | float | tuple[int | float, int | float]
+
+_TIMEOUT_ERROR = "timeout must be a positive number of seconds or a (connect, read) pair"
+
+
+def _positive_seconds(value: object) -> None:
+    if value is None:
+        raise ValueError(_TIMEOUT_ERROR)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(_TIMEOUT_ERROR)
+    if value <= 0:
+        raise ValueError(_TIMEOUT_ERROR)
+
+
+def _checked_timeout(timeout: object) -> _Timeout:
+    if isinstance(timeout, tuple):
+        if len(timeout) != 2:
+            raise TypeError(_TIMEOUT_ERROR)
+        for part in timeout:
+            _positive_seconds(part)
+        return timeout
+    _positive_seconds(timeout)
+    assert isinstance(timeout, (int, float))
+    return timeout
+
+
 def _response_body(response: requests.Response) -> object:
     if response.text == "":
         return ""
@@ -85,20 +111,35 @@ class MailTMClient:
     A robust API wrapper for https://docs.mail.tm/ 
     Handles domain fetching, account creation, authentication, and message retrieval.
     """
-    def __init__(self, base_url: str = "https://api.mail.tm"):
+    def __init__(
+        self,
+        base_url: str = "https://api.mail.tm",
+        *,
+        timeout: _Timeout = 10.0,
+    ):
         self.base_url = base_url
+        self._timeout = _checked_timeout(timeout)
         self.session = requests.Session()
         self.token: str | None = None
         self.domain: str | None = None
         self.email_address: str | None = None
         self.password: str | None = None
 
+    def _effective_timeout(self, timeout: object) -> _Timeout:
+        if timeout is None:
+            return self._timeout
+        return _checked_timeout(timeout)
+
     def _send(self, method: str, path: str, **kwargs: object) -> requests.Response:
+        timeout = self._effective_timeout(kwargs.pop("timeout", None))
         operation = f"{method} {path}"
         try:
-            response = self.session.request(method, f"{self.base_url}{path}", **kwargs)
+            response = self.session.request(
+                method, f"{self.base_url}{path}", timeout=timeout, **kwargs
+            )
         except requests.Timeout as exc:
-            raise MailTMTimeoutError(f"{operation} timed out") from exc
+            # ConnectTimeout subclasses ConnectionError, so it has to be handled first.
+            raise MailTMTimeoutError(f"{operation} timed out (timeout={timeout})") from exc
         except requests.ConnectionError as exc:
             raise MailTMConnectionError(f"{operation} could not connect") from exc
 
@@ -112,9 +153,9 @@ class MailTMClient:
         response = self._send(method, path, **kwargs)
         return _json_object(response, f"{method} {path}")
 
-    def get_domain(self) -> str:
+    def get_domain(self, *, timeout: _Timeout | None = None) -> str:
         """Fetch an available domain from the MailTR API."""
-        payload = self._read_json("GET", "/domains")
+        payload = self._read_json("GET", "/domains", timeout=timeout)
         domains = require_member_list(payload)
         if not domains:
             raise MailTMResponseError("No available domains found.", body=payload)
@@ -123,21 +164,35 @@ class MailTMClient:
         self.domain = domain_item["domain"]
         return self.domain
 
-    def create_account(self, email_address: str, password: str) -> bool:
+    def create_account(
+        self,
+        email_address: str,
+        password: str,
+        *,
+        timeout: _Timeout | None = None,
+    ) -> bool:
         """Create a new disposable account."""
         self._read_json(
             "POST",
             "/accounts",
             json={"address": email_address, "password": password},
+            timeout=timeout,
         )
         return True
 
-    def login(self, email_address: str, password: str) -> str:
+    def login(
+        self,
+        email_address: str,
+        password: str,
+        *,
+        timeout: _Timeout | None = None,
+    ) -> str:
         """Login and return the JWT token."""
         payload = self._read_json(
             "POST",
             "/token",
             json={"address": email_address, "password": password},
+            timeout=timeout,
         )
         require_keys(payload, ("token",))
         token = payload["token"]
@@ -145,19 +200,26 @@ class MailTMClient:
         self.session.headers.update({"Authorization": f"Bearer {token}"})
         return token
 
-    def read_inbox(self) -> list[MessageSummary]:
+    def read_inbox(self, *, timeout: _Timeout | None = None) -> list[MessageSummary]:
         """Fetch the list of messages in the inbox."""
+        timeout = self._effective_timeout(timeout)
         self._require_login()
-        payload = self._read_json("GET", "/messages")
+        payload = self._read_json("GET", "/messages", timeout=timeout)
         messages = require_member_list(payload)
         for message in messages:
             require_keys(message, MESSAGE_SUMMARY_KEYS, body=payload)
         return messages
 
-    def read_message(self, message_id: str) -> Message:
+    def read_message(
+        self,
+        message_id: str,
+        *,
+        timeout: _Timeout | None = None,
+    ) -> Message:
         """Fetch the full content of a specific message."""
+        timeout = self._effective_timeout(timeout)
         self._require_login()
-        payload = self._read_json("GET", f"/messages/{message_id}")
+        payload = self._read_json("GET", f"/messages/{message_id}", timeout=timeout)
         require_keys(payload, MESSAGE_DETAIL_KEYS)
         return payload
 
@@ -165,10 +227,11 @@ class MailTMClient:
         if not self.token:
             raise MailTMNotAuthenticatedError("Not authenticated. Call login() first.")
 
-    def generate_random_credentials(self) -> tuple[str, str]:
+    def generate_random_credentials(self, *, timeout: _Timeout | None = None) -> tuple[str, str]:
         """Helper to generate a random email and password."""
+        timeout = self._effective_timeout(timeout)
         if not self.domain:
-            self.get_domain()
+            self.get_domain(timeout=timeout)
         
         local_part = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(10))
         email = f"{local_part}@{self.domain}"
