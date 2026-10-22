@@ -1,3 +1,4 @@
+import math
 import secrets
 import string
 from collections.abc import Callable, Collection
@@ -98,6 +99,8 @@ def _retry_after(response: requests.Response) -> int | float | None:
     try:
         seconds = float(header)
     except ValueError:
+        return None
+    if not math.isfinite(seconds) or seconds <= 0:
         return None
     if seconds.is_integer():
         return int(seconds)

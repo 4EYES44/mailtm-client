@@ -250,6 +250,46 @@ def test_account_creation_keeps_a_server_error_when_retry_after_exceeds_the_cap(
 
 
 HTTP_DATE = "Wed, 21 Oct 2015 07:28:00 GMT"
+UNUSABLE_RETRY_AFTER = ["-5", "0", "0.0", "-0", "nan", "NaN", "inf", "Infinity", "-inf"]
+
+
+@pytest.mark.parametrize("status", [429, 503])
+@pytest.mark.parametrize("header", UNUSABLE_RETRY_AFTER)
+def test_unusable_retry_after_falls_back_to_the_backoff_delay(
+    fake_clock, mocked_responses, status, header
+):
+    """A negative, zero, nan or infinite Retry-After is ignored, so the wait is the backoff."""
+    fake_clock.jitter = 0.0
+    mocked_responses.add(
+        responses.GET,
+        f"{BASE_URL}/domains",
+        json={"message": "later"},
+        status=status,
+        headers={"Retry-After": header},
+    )
+    mocked_responses.add(
+        responses.GET, f"{BASE_URL}/domains", json=DOMAIN_COLLECTION, status=200
+    )
+
+    assert MailTMClient().get_domain() == "example.com"
+    assert fake_clock.delays == [1.0]
+
+
+@pytest.mark.parametrize("header", UNUSABLE_RETRY_AFTER)
+def test_unusable_retry_after_is_not_recorded(mocked_responses, header):
+    """A 429 keeps retry_after empty when the header is not a usable delay."""
+    mocked_responses.add(
+        responses.GET,
+        f"{BASE_URL}/domains",
+        json={"message": "later"},
+        status=429,
+        headers={"Retry-After": header},
+    )
+
+    with pytest.raises(MailTMRateLimitError) as caught:
+        MailTMClient(retry=RetryPolicy(max_attempts=1)).get_domain()
+
+    assert caught.value.retry_after is None
 
 
 @pytest.mark.parametrize("status", [429, 503])
