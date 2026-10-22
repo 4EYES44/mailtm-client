@@ -298,9 +298,12 @@ class MailTMClient:
             try:
                 return self._exchange(method, path, timeout, **kwargs)
             except retryable as exc:
+                # A Retry-After past the cap raises even on the final attempt,
+                # so a 503 does not change class according to which try it was.
+                delay = self._pause(attempt, exc)
                 if attempt >= self._retry.max_attempts:
                     raise
-                _timing.sleep(self._pause(attempt, exc))
+                _timing.sleep(delay)
 
     def _read_json(self, method: str, path: str, **kwargs: object) -> dict[str, object]:
         response = self._send(method, path, **kwargs)
