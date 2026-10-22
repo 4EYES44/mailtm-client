@@ -10,6 +10,7 @@ from mailtm_client_wrapper import (
     MailTMNotAuthenticatedError,
     MailTMServerError,
     MailTMWaitTimeoutError,
+    RetryPolicy,
 )
 
 BASE_URL = "https://api.mail.tm"
@@ -175,6 +176,7 @@ def test_message_arriving_on_the_deadline_poll_is_returned(mocked_responses, fak
 
 def test_inbox_error_stops_the_wait_immediately(mocked_responses, fake_clock):
     """A library error from a poll is raised at once and the wait does not sleep or poll again."""
+    mocked_responses.add(responses.POST, f"{BASE_URL}/token", json=TOKEN, status=200)
     mocked_responses.add(
         responses.GET,
         f"{BASE_URL}/messages",
@@ -182,7 +184,8 @@ def test_inbox_error_stops_the_wait_immediately(mocked_responses, fake_clock):
         status=503,
         match=[matchers.query_param_matcher({"page": "1"})],
     )
-    client = _logged_in_client(mocked_responses)
+    client = MailTMClient(retry=RetryPolicy(max_attempts=1))
+    client.login("user@example.com", "password")
 
     with pytest.raises(MailTMServerError) as caught:
         client.wait_for_message(timeout=30.0, poll_interval=3.0)

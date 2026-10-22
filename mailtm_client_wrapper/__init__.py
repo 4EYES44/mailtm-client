@@ -1,4 +1,4 @@
-from .client import MailTMClient
+from .client import MailTMClient, RetryPolicy
 from .exceptions import (
     MailTMAPIError,
     MailTMAuthError,
@@ -16,6 +16,7 @@ from .models import Message, MessageSummary
 
 __all__ = [
     "MailTMClient",
+    "RetryPolicy",
     "MailTMError",
     "MailTMTimeoutError",
     "MailTMConnectionError",
