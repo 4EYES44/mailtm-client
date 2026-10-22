@@ -293,14 +293,9 @@ class MailTMClient:
         if not isinstance(override, (int, float)) or isinstance(override, bool):
             return self._retry._backoff_delay(retry_number, _timing.jitter_fraction())
         if override > self._retry.max_delay:
-            if isinstance(exc, MailTMRateLimitError):
-                raise exc
-            raise MailTMRateLimitError(
-                str(exc),
-                status_code=exc.status_code,
-                body=exc.body,
-                retry_after=override,
-            ) from exc.__cause__
+            # Sleeping the header would exceed max_delay. The original error
+            # already has the right class, so a 503 is not turned into a 429.
+            raise exc
         return override
 
     def _request_with_retries(
@@ -316,8 +311,8 @@ class MailTMClient:
             try:
                 return self._request_once(method, path, timeout, **kwargs)
             except retryable as exc:
-                # A Retry-After past the cap raises even on the final attempt,
-                # so a 503 does not change class according to which try it was.
+                # Consult Retry-After before giving up, so a value past the cap
+                # raises on the last attempt the same way it does on an earlier one.
                 delay = self._retry_delay(attempt, exc)
                 if attempt >= self._retry.max_attempts:
                     raise

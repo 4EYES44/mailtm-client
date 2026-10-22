@@ -298,16 +298,13 @@ def test_short_retry_after_replaces_the_backoff_delay(
     assert fake_clock.delays == [1.5]
 
 
-@pytest.mark.parametrize("status", [429, 503])
-def test_retry_after_above_the_cap_fails_immediately(
-    fake_clock, mocked_responses, status
-):
-    """A Retry-After longer than the cap raises a rate-limit error and does not sleep."""
+def test_retry_after_above_the_cap_fails_immediately(fake_clock, mocked_responses):
+    """A 429 Retry-After longer than the cap raises a rate-limit error and does not sleep."""
     mocked_responses.add(
         responses.GET,
         f"{BASE_URL}/domains",
         json={"message": "later"},
-        status=status,
+        status=429,
         headers={"Retry-After": "30"},
     )
 
@@ -317,33 +314,32 @@ def test_retry_after_above_the_cap_fails_immediately(
     error = caught.value
     assert type(error) is MailTMRateLimitError
     assert error.retry_after == 30
-    assert error.status_code == status
+    assert error.status_code == 429
     assert len(_calls_for(mocked_responses, "/domains")) == 1
     assert fake_clock.delays == []
 
 
-@pytest.mark.parametrize("status", [429, 503])
 @pytest.mark.parametrize(
     ("max_attempts", "earlier_failures"),
     [(1, 0), (3, 2)],
 )
 def test_long_retry_after_is_a_rate_limit_error_on_every_attempt(
-    fake_clock, mocked_responses, status, max_attempts, earlier_failures
+    fake_clock, mocked_responses, max_attempts, earlier_failures
 ):
-    """A Retry-After past the cap raises a rate-limit error on the first try and the last."""
+    """A 429 Retry-After past the cap raises a rate-limit error on the first try and the last."""
     fake_clock.jitter = 0.0
     for _ in range(earlier_failures):
         mocked_responses.add(
             responses.GET,
             f"{BASE_URL}/domains",
             json={"message": "later"},
-            status=status,
+            status=429,
         )
     mocked_responses.add(
         responses.GET,
         f"{BASE_URL}/domains",
         json={"message": "later"},
-        status=status,
+        status=429,
         headers={"Retry-After": "30"},
     )
 
@@ -355,10 +351,48 @@ def test_long_retry_after_is_a_rate_limit_error_on_every_attempt(
     error = caught.value
     assert type(error) is MailTMRateLimitError
     assert error.retry_after == 30
-    assert error.status_code == status
+    assert error.status_code == 429
     assert error.body == {"message": "later"}
     assert isinstance(error.__cause__, requests.HTTPError)
     assert len(_calls_for(mocked_responses, "/domains")) == max_attempts
+    assert fake_clock.delays == [1.0, 2.0][:earlier_failures]
+
+
+@pytest.mark.parametrize(
+    ("max_attempts", "earlier_failures"),
+    [(3, 0), (3, 1), (3, 2), (1, 0)],
+)
+def test_long_retry_after_on_503_is_a_server_error_on_every_attempt(
+    fake_clock, mocked_responses, max_attempts, earlier_failures
+):
+    """A 503 Retry-After past the cap stays a server error and is not slept, on any attempt."""
+    fake_clock.jitter = 0.0
+    for _ in range(earlier_failures):
+        mocked_responses.add(
+            responses.GET,
+            f"{BASE_URL}/domains",
+            json={"message": "later"},
+            status=503,
+        )
+    mocked_responses.add(
+        responses.GET,
+        f"{BASE_URL}/domains",
+        json={"message": "later"},
+        status=503,
+        headers={"Retry-After": "30"},
+    )
+
+    with pytest.raises(MailTMServerError) as caught:
+        MailTMClient(
+            retry=RetryPolicy(max_attempts=max_attempts, base_delay=1.0, max_delay=8.0)
+        ).get_domain()
+
+    error = caught.value
+    assert type(error) is MailTMServerError
+    assert error.status_code == 503
+    assert error.body == {"message": "later"}
+    assert isinstance(error.__cause__, requests.HTTPError)
+    assert len(_calls_for(mocked_responses, "/domains")) == earlier_failures + 1
     assert fake_clock.delays == [1.0, 2.0][:earlier_failures]
 
 
