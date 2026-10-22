@@ -66,7 +66,7 @@ The blocks in this section are signatures. Each method accepts `timeout=` as a k
 get_domain(*, timeout=None) -> str
 ```
 
-`GET /domains`. Reads the first page only. Returns the `domain` of the first member that is a JSON object with boolean `isActive` true and boolean `isPrivate` false, and stores it on `client.domain`. If that member has no `domain` key, `MailTMResponseError` is raised and later members are not considered. If no member qualifies, including when `hydra:member` is an empty list, raises `MailTMResponseError`.
+`GET /domains`. Reads the first page only. Every `hydra:member` item is validated before a domain is chosen. Each item must be a JSON object with a `domain` key. An item that is not an object raises `MailTMResponseError` (`Response item is not an object.`). An item that omits `domain` raises `MailTMResponseError` (`Response is missing domain.`). Either error leaves `client.domain` unset. The method then returns the `domain` of the first member whose boolean `isActive` is true and whose boolean `isPrivate` is false, and stores it on `client.domain`. If no member qualifies, including when `hydra:member` is an empty list, it raises `MailTMResponseError` (`No available domains found.`).
 
 ### `create_account`
 
@@ -106,7 +106,7 @@ read_inbox(*, timeout=None) -> list[MessageSummary]
 
 The result is one list, in the order the server sent, with duplicate ids removed. The return value is the dicts from the API. The annotation is `list[MessageSummary]`; nothing is converted into a class.
 
-Each page is a separate HTTP call. Every page uses the timeout chosen for this `read_inbox` call and gets its own retry attempts. If a page fails after retries, that error is raised and the method does not return the pages already read. A missing `hydra:member`, a `hydra:member` that is not a list, or a message that is not an object or lacks a required key raises `MailTMResponseError`. An inbox whose first page has an empty `hydra:member` returns `[]`.
+Each page is a separate HTTP call. Every page uses the timeout chosen for this `read_inbox` call and gets its own retry attempts. If a page fails after retries, that error is raised and the method does not return the pages already read. A missing `hydra:member` (`Response is missing hydra:member.`), a `hydra:member` that is not a list (`Response hydra:member is not a list.`), a message that is not an object (`Response item is not an object.`), or a message that lacks a required key (`Response is missing {key}.`) raises `MailTMResponseError`. An inbox whose first page has an empty `hydra:member` returns `[]`.
 
 `read_inbox` requires `login` first.
 
@@ -234,7 +234,7 @@ MailTMError
 | HTTP 429 | `MailTMRateLimitError` |
 | HTTP 5xx | `MailTMServerError`. A 503 with a numeric `Retry-After` above `max_delay` is `MailTMRateLimitError` (except on `create_account`, which does not retry 503) |
 | Any other non-2xx, including 404 and 422 | `MailTMAPIError` |
-| 2xx body that is not valid JSON, is not a JSON object, lacks `hydra:member`, or lacks a required key | `MailTMResponseError` |
+| 2xx body that is not valid JSON, is not a JSON object, lacks `hydra:member` or has one that is not a list, has a member that is not an object or lacks a required key, or is a domain page with no active public domain | `MailTMResponseError` |
 | Wait deadline elapsed | `MailTMWaitTimeoutError` |
 
 `MailTMAPIError` carries `status_code` and `body` from the response. `body` is the parsed JSON, or the raw text when the error body is not JSON, or `""` when the body is empty. The message is `Mail.tm returned {status_code}`.
@@ -243,9 +243,20 @@ MailTMError
 
 `MailTMNotAuthenticatedError` is raised before a request, with the message `Not authenticated. Call login() first.` Its `status_code` and `body` are `None`. It is a subclass of `MailTMAuthError`, so an `except MailTMAuthError` catches it.
 
-`MailTMResponseError` names the missing key (`Response is missing {key}.`), a missing `hydra:member` (`Response is missing hydra:member.`), a `hydra:member` that is not a list (`Response hydra:member is not a list.`), or a body that is not valid JSON or not a JSON object. `status_code` is set when the body is not valid JSON or not a JSON object. It stays `None` when the failure is a missing key or a bad `hydra:member`. `body` is the payload, or the response text when the body is not valid JSON.
+`MailTMResponseError` carries `status_code` and `body`. Both stay `None` except where the table sets them. `__cause__` is set only in the rows that name one.
 
-HTTP and transport failures are chained to the `requests` exception (`__cause__`). A response error is chained to the `KeyError`, `TypeError`, or JSON decode error that found the problem. `MailTMNotAuthenticatedError` and `MailTMWaitTimeoutError` are raised directly.
+| Case | Message | `status_code` | `body` | `__cause__` |
+| --- | --- | --- | --- | --- |
+| 2xx body is not valid JSON, including an empty body | `{METHOD} {path} returned a body that is not valid JSON` | the HTTP status | the response text | `requests.JSONDecodeError` |
+| 2xx JSON is not an object | `{METHOD} {path} returned a body that is not a JSON object` | the HTTP status | the parsed JSON value; JSON `null` leaves `body` as `None` | none |
+| An object omits a required key | `Response is missing {key}.` | `None` | the collection page for a domain or inbox item; the response object for a token or a message | `KeyError` |
+| `hydra:member` is absent | `Response is missing hydra:member.` | `None` | the response object | `KeyError` |
+| `hydra:member` is not a list | `Response hydra:member is not a list.` | `None` | the response object | `TypeError` |
+| A `hydra:member` item is not an object | `Response item is not an object.` | `None` | the collection page | `TypeError` |
+| No domain is active and public | `No available domains found.` | `None` | the domain page | none |
+| `ContentDecodingError` | `{METHOD} {path} returned a body that could not be decoded` | `None` | `None` | that `requests.exceptions.ContentDecodingError` |
+
+HTTP and transport failures are chained to the `requests` exception (`__cause__`). `MailTMNotAuthenticatedError` and `MailTMWaitTimeoutError` are raised directly, with no cause.
 
 With `client`, `email`, and `password` from [Quick start](#quick-start), and `seen` from the wait example:
 
@@ -268,9 +279,9 @@ except MailTMError:
 
 `MessageSummary` and `Message` are `TypedDict` annotations exported from `mailtm_client_wrapper`. `read_inbox` and `read_message` are annotated with them. The objects returned at runtime are the plain dicts the API sent. Keys are not renamed or dropped. Values are not parsed: `html` is whatever the server sent (the annotation types it as `list[str]`), and timestamp fields are left as sent. Unknown keys stay on the dict.
 
-Validation checks that required keys are present. It does not check types or whether a value is null.
+Validation checks that a collection item is an object and that required keys are present. It does not check the types of those values, or whether a value is null.
 
-Required on every inbox summary and on a full message: `id`, `from`, `subject`, `createdAt`, `seen`, `hasAttachments`. A full message also requires `text` and `html`. A chosen domain requires `domain`. A token response requires `token`.
+Required on every inbox summary and on a full message: `id`, `from`, `subject`, `createdAt`, `seen`, `hasAttachments`. A full message also requires `text` and `html`. Every domain list item requires `domain`, and that check runs on the whole page before a domain is chosen. A token response requires `token`.
 
 `intro` is optional on a summary. Other keys the annotations allow, and any key the server adds, are not required.
 
@@ -309,8 +320,8 @@ Compared with the previous client in this repository:
 - Failures are `MailTMError` subclasses. They used to be a bare `Exception` with messages such as `Failed to fetch domain: ...`, `Error creating account: ...`, `Login failed: ...`, `Failed to fetch inbox: ...`, and `Failed to fetch message ...: ...`.
 - Every request has a timeout. The constructor takes keyword-only `timeout` (default `10.0`) and `retry`. A request cannot be left unbounded.
 - `read_inbox` returns every page in one list, de-duplicated by `id`. A missing `hydra:member` used to become `[]` and only the first page was requested. A failure on a later page now raises and does not return a partial list.
-- `get_domain` returns the first active, non-private domain on the first page, and raises `MailTMResponseError` when none qualifies. It used to return the first member's `domain` whenever the list was non-empty.
-- A 2xx body that is not a JSON object, or that omits a required key, raises `MailTMResponseError` instead of `KeyError` or a wrapped `Exception`.
+- `get_domain` returns the first active, non-private domain on the first page, after every member has been checked. A member that is not an object, or that omits `domain`, raises `MailTMResponseError` before a domain is chosen. A page with no qualifying domain raises `MailTMResponseError`. It used to return the first member's `domain` whenever the list was non-empty.
+- A 2xx body that is not valid JSON, is not a JSON object, or omits a required key raises `MailTMResponseError` instead of `KeyError` or a wrapped `Exception`. A collection item that is not an object raises `MailTMResponseError` with the message `Response item is not an object.`
 - Transient failures are retried by default (3 attempts). `create_account` retries only 429.
 - Python 3.12 or newer is required.
 
