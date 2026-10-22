@@ -37,8 +37,8 @@ def test_login_names_a_missing_token_and_chains_the_key_error(mocked_responses):
 
 
 def test_domain_lookup_names_a_missing_domain_key(mocked_responses):
-    """The first domain item without a domain key names that key."""
-    payload = {"hydra:member": [{"id": "1", "isActive": True}]}
+    """A usable domain item without a domain key names that key."""
+    payload = {"hydra:member": [{"id": "1", "isActive": True, "isPrivate": False}]}
     mocked_responses.add(responses.GET, f"{BASE_URL}/domains", json=payload, status=200)
 
     with pytest.raises(MailTMResponseError, match=r"\bdomain\b") as caught:
@@ -195,23 +195,43 @@ def test_empty_inbox_is_an_empty_list(mocked_responses):
     assert client.read_inbox() == []
 
 
-def test_domain_lookup_returns_the_first_domain_key(mocked_responses):
-    """Domain lookup uses the first item's domain key and does not filter the list."""
+def test_domain_lookup_returns_the_first_active_public_domain(mocked_responses):
+    """Inactive and private domains are skipped; the first usable domain is returned."""
     mocked_responses.add(
         responses.GET,
         f"{BASE_URL}/domains",
         json={
             "hydra:member": [
-                {"domain": "first.example", "isActive": False, "isPrivate": True},
-                {"domain": "second.example", "isActive": True, "isPrivate": False},
+                {"domain": "inactive.example", "isActive": False, "isPrivate": False},
+                {"domain": "private.example", "isActive": True, "isPrivate": True},
+                {"domain": "public.example", "isActive": True, "isPrivate": False},
+                {"domain": "later.example", "isActive": True, "isPrivate": False},
             ]
         },
         status=200,
     )
     client = MailTMClient()
 
-    assert client.get_domain() == "first.example"
-    assert client.domain == "first.example"
+    assert client.get_domain() == "public.example"
+    assert client.domain == "public.example"
+
+
+def test_domain_lookup_rejects_when_no_domain_is_usable(mocked_responses):
+    """A domain list with nothing active and public is a response error."""
+    mocked_responses.add(
+        responses.GET,
+        f"{BASE_URL}/domains",
+        json={
+            "hydra:member": [
+                {"domain": "inactive.example", "isActive": False, "isPrivate": False},
+                {"domain": "private.example", "isActive": True, "isPrivate": True},
+            ]
+        },
+        status=200,
+    )
+
+    with pytest.raises(MailTMResponseError):
+        MailTMClient().get_domain()
 
 
 def test_create_account_returns_true(mocked_responses):
