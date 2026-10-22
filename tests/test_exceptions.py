@@ -257,6 +257,48 @@ def test_empty_domain_list_is_a_response_error(mocked_responses):
     assert not isinstance(caught.value, MailTMAPIError)
 
 
+OTHER_REQUEST_FAILURES = [
+    (requests.exceptions.ChunkedEncodingError, MailTMConnectionError, 3),
+    (requests.exceptions.ContentDecodingError, MailTMResponseError, 1),
+    (requests.exceptions.TooManyRedirects, MailTMError, 1),
+    (requests.exceptions.InvalidURL, MailTMError, 1),
+    (requests.exceptions.InvalidHeader, MailTMError, 1),
+    (requests.exceptions.MissingSchema, MailTMError, 1),
+    (requests.exceptions.InvalidSchema, MailTMError, 1),
+    (requests.exceptions.URLRequired, MailTMError, 1),
+    (requests.exceptions.RetryError, MailTMError, 1),
+    (requests.exceptions.UnrewindableBodyError, MailTMError, 1),
+]
+
+
+@pytest.mark.parametrize(("requests_error", "error_type", "attempts"), OTHER_REQUEST_FAILURES)
+def test_other_requests_failures_are_library_errors_and_only_a_broken_body_is_retried(
+    fake_clock, mocked_responses, requests_error, error_type, attempts
+):
+    """A requests failure other than a timeout or a dropped connection is still a library error.
+
+    A body cut off mid-transfer is a connection error and is tried again. A bad URL,
+    a redirect loop, a body that cannot be decoded, and any other request failure
+    are raised once, with the requests error chained.
+    """
+    fake_clock.jitter = 0.0
+    for _ in range(attempts):
+        mocked_responses.add(
+            responses.GET,
+            f"{BASE_URL}/domains",
+            body=requests_error("request failed"),
+        )
+
+    with pytest.raises(error_type) as caught:
+        MailTMClient().get_domain()
+
+    error = caught.value
+    assert type(error) is error_type
+    assert isinstance(error.__cause__, requests_error)
+    assert len(mocked_responses.calls) == attempts
+    assert fake_clock.delays == ([1.0, 2.0] if attempts == 3 else [])
+
+
 def test_login_without_a_token_is_a_response_error(mocked_responses):
     """A 2xx login body with no token is a response error, not a bare Exception."""
     mocked_responses.add(

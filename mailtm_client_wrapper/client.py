@@ -114,6 +114,22 @@ def _retry_after_header(exc: MailTMError) -> int | float | None:
     return _retry_after(response)
 
 
+def _error_for_other_request(exc: requests.RequestException, operation: str) -> MailTMError:
+    """Wrap a requests failure that is neither a timeout nor a dropped connection.
+
+    A body cut off mid-transfer is a connection error, so it is retried. A body
+    that cannot be decoded is a response error. A bad URL, a redirect loop and
+    every other request failure stay on the root error and are not retried.
+    """
+    if isinstance(exc, requests.exceptions.ChunkedEncodingError):
+        return MailTMConnectionError(f"{operation} could not connect")
+    if isinstance(exc, requests.exceptions.ContentDecodingError):
+        return MailTMResponseError(
+            f"{operation} returned a body that could not be decoded"
+        )
+    return MailTMError(f"{operation} could not be completed")
+
+
 def _error_for_status(response: requests.Response) -> MailTMAPIError:
     status_code = response.status_code
     body = _response_body(response)
@@ -210,6 +226,8 @@ class MailTMClient:
             raise MailTMTimeoutError(f"{operation} timed out (timeout={timeout})") from exc
         except requests.ConnectionError as exc:
             raise MailTMConnectionError(f"{operation} could not connect") from exc
+        except requests.RequestException as exc:
+            raise _error_for_other_request(exc, operation) from exc
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
