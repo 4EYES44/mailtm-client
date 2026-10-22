@@ -56,34 +56,38 @@ class RetryPolicy:
         if self.max_attempts < 1:
             raise ValueError("max_attempts must be an integer greater than or equal to 1")
         for name in ("base_delay", "max_delay"):
-            value = getattr(self, name)
-            message = f"{name} must be a positive finite number of seconds"
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise TypeError(message)
-            if not math.isfinite(value) or value <= 0:
-                raise ValueError(message)
+            _require_positive_finite(
+                getattr(self, name),
+                f"{name} must be a positive finite number of seconds",
+            )
         if self.max_delay < self.base_delay:
             raise ValueError("max_delay must be greater than or equal to base_delay")
+
+
+def _require_positive_finite(number: object, message: str) -> int | float:
+    """Reject a bool, a non-number, or a number that is not positive and finite.
+
+    ``None`` is not handled here. Callers that must report ``None`` as
+    ``ValueError`` check it first; other callers get ``TypeError``.
+    """
+    if isinstance(number, bool) or not isinstance(number, (int, float)):
+        raise TypeError(message)
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError(message)
+    return number
 
 
 def _positive_duration(value: object, name: str) -> int | float:
     message = f"{name} must be a positive number of seconds"
     if value is None:
         raise ValueError(message)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(message)
-    if not math.isfinite(value) or value <= 0:
-        raise ValueError(message)
-    return value
+    return _require_positive_finite(value, message)
 
 
 def _positive_seconds(value: object) -> None:
     if value is None:
         raise ValueError(_TIMEOUT_ERROR)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(_TIMEOUT_ERROR)
-    if not math.isfinite(value) or value <= 0:
-        raise ValueError(_TIMEOUT_ERROR)
+    _require_positive_finite(value, _TIMEOUT_ERROR)
 
 
 def _checked_timeout(timeout: object) -> _Timeout:
