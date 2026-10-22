@@ -5,9 +5,17 @@ list and the keys a caller can rely on. They do not check field types.
 """
 
 from .exceptions import MailTMResponseError
+from .models import Message, MessageSummary
 
-MESSAGE_SUMMARY_KEYS = ("id", "from", "subject", "createdAt", "seen", "hasAttachments")
-MESSAGE_DETAIL_KEYS = (*MESSAGE_SUMMARY_KEYS, "text", "html")
+
+def _required_keys(shape: type[MessageSummary] | type[Message]) -> tuple[str, ...]:
+    """Required TypedDict keys in definition order. There is no second list."""
+    required = shape.__required_keys__
+    return tuple(key for key in shape.__annotations__ if key in required)
+
+
+MESSAGE_SUMMARY_KEYS = _required_keys(MessageSummary)
+MESSAGE_DETAIL_KEYS = _required_keys(Message)
 
 
 def require_member_list(payload: dict[str, object]) -> list[object]:
