@@ -36,6 +36,40 @@ def test_login_names_a_missing_token_and_chains_the_key_error(mocked_responses):
     assert caught.value.body == {"id": "abc"}
 
 
+def test_domain_lookup_rejects_a_non_dict_item(mocked_responses):
+    """A domain entry that is not an object is a response error naming domain."""
+    payload = {
+        "hydra:member": [
+            "example.com",
+            {"domain": "ok.example", "isActive": True, "isPrivate": False},
+        ]
+    }
+    mocked_responses.add(responses.GET, f"{BASE_URL}/domains", json=payload, status=200)
+
+    with pytest.raises(MailTMResponseError, match=r"\bdomain\b") as caught:
+        MailTMClient().get_domain()
+
+    assert isinstance(caught.value.__cause__, TypeError)
+    assert caught.value.body == payload
+
+
+def test_domain_lookup_rejects_an_inactive_item_missing_domain(mocked_responses):
+    """An item that would be skipped still has to include domain."""
+    payload = {
+        "hydra:member": [
+            {"id": "1", "isActive": False, "isPrivate": False},
+            {"domain": "ok.example", "isActive": True, "isPrivate": False},
+        ]
+    }
+    mocked_responses.add(responses.GET, f"{BASE_URL}/domains", json=payload, status=200)
+
+    with pytest.raises(MailTMResponseError, match=r"\bdomain\b") as caught:
+        MailTMClient().get_domain()
+
+    assert isinstance(caught.value.__cause__, KeyError)
+    assert caught.value.body == payload
+
+
 def test_domain_lookup_names_a_missing_domain_key(mocked_responses):
     """A usable domain item without a domain key names that key."""
     payload = {"hydra:member": [{"id": "1", "isActive": True, "isPrivate": False}]}

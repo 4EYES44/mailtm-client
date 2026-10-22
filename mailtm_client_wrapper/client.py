@@ -329,9 +329,9 @@ class MailTMClient:
         payload = self._read_json("GET", "/domains", timeout=timeout)
         domains = require_member_list(payload)
         for domain_item in domains:
-            if not isinstance(domain_item, dict) or not _is_active_public_domain(domain_item):
-                continue
             require_keys(domain_item, ("domain",), body=payload)
+            if not _is_active_public_domain(domain_item):
+                continue
             domain = domain_item["domain"]
             self.domain = domain
             return domain
