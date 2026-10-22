@@ -1,3 +1,33 @@
-from .client import MailTMClient
+from .client import MailTMClient, RetryPolicy
+from .exceptions import (
+    MailTMAPIError,
+    MailTMAuthError,
+    MailTMConnectionError,
+    MailTMError,
+    MailTMNotAuthenticatedError,
+    MailTMRateLimitError,
+    MailTMResponseError,
+    MailTMServerError,
+    MailTMTimeoutError,
+    MailTMWaitTimeoutError,
+)
+from .extract import extract_between
+from .models import Message, MessageSummary
 
-__all__ = ["MailTMClient"]
+__all__ = [
+    "MailTMClient",
+    "RetryPolicy",
+    "MailTMError",
+    "MailTMTimeoutError",
+    "MailTMConnectionError",
+    "MailTMAPIError",
+    "MailTMAuthError",
+    "MailTMNotAuthenticatedError",
+    "MailTMRateLimitError",
+    "MailTMServerError",
+    "MailTMResponseError",
+    "MailTMWaitTimeoutError",
+    "extract_between",
+    "Message",
+    "MessageSummary",
+]
