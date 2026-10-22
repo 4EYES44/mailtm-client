@@ -63,6 +63,10 @@ class RetryPolicy:
         if self.max_delay < self.base_delay:
             raise ValueError("max_delay must be greater than or equal to base_delay")
 
+    def _backoff_delay(self, retry_number: int, jitter_fraction: float) -> float:
+        computed = min(self.max_delay, self.base_delay * 2 ** (retry_number - 1))
+        return computed + computed * _JITTER_SHARE * jitter_fraction
+
 
 def _require_positive_finite(number: object, message: str) -> int | float:
     """Reject a bool, a non-number, or a number that is not positive and finite.
@@ -255,11 +259,6 @@ class MailTMClient:
             return self._timeout
         return _checked_timeout(timeout)
 
-    def _backoff_delay(self, retry_number: int) -> float:
-        policy = self._retry
-        computed = min(policy.max_delay, policy.base_delay * 2 ** (retry_number - 1))
-        return computed + computed * _JITTER_SHARE * _timing.jitter_fraction()
-
     def _request_once(
         self,
         method: str,
@@ -289,10 +288,10 @@ class MailTMClient:
             raise _error_for_status(response) from exc
         return response
 
-    def _pause(self, retry_number: int, exc: MailTMError) -> float:
+    def _retry_delay(self, retry_number: int, exc: MailTMError) -> float:
         override = getattr(exc, "_retry_after", None)
         if not isinstance(override, (int, float)) or isinstance(override, bool):
-            return self._backoff_delay(retry_number)
+            return self._retry._backoff_delay(retry_number, _timing.jitter_fraction())
         if override > self._retry.max_delay:
             if isinstance(exc, MailTMRateLimitError):
                 raise exc
@@ -319,7 +318,7 @@ class MailTMClient:
             except retryable as exc:
                 # A Retry-After past the cap raises even on the final attempt,
                 # so a 503 does not change class according to which try it was.
-                delay = self._pause(attempt, exc)
+                delay = self._retry_delay(attempt, exc)
                 if attempt >= self._retry.max_attempts:
                     raise
                 _timing.sleep(delay)
