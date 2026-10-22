@@ -13,6 +13,13 @@ from .exceptions import (
     MailTMServerError,
     MailTMTimeoutError,
 )
+from .models import Message, MessageSummary
+from .validation import (
+    MESSAGE_DETAIL_KEYS,
+    MESSAGE_SUMMARY_KEYS,
+    require_keys,
+    require_member_list,
+)
 
 
 def _response_body(response: requests.Response) -> object:
@@ -108,10 +115,12 @@ class MailTMClient:
     def get_domain(self) -> str:
         """Fetch an available domain from the MailTR API."""
         payload = self._read_json("GET", "/domains")
-        domains = payload.get("hydra:member", [])
+        domains = require_member_list(payload)
         if not domains:
             raise MailTMResponseError("No available domains found.", body=payload)
-        self.domain = domains[0]["domain"]
+        domain_item = domains[0]
+        require_keys(domain_item, ("domain",), body=payload)
+        self.domain = domain_item["domain"]
         return self.domain
 
     def create_account(self, email_address: str, password: str) -> bool:
@@ -130,23 +139,27 @@ class MailTMClient:
             "/token",
             json={"address": email_address, "password": password},
         )
-        token = payload.get("token")
-        if not isinstance(token, str) or not token:
-            raise MailTMResponseError("Response is missing token.", body=payload)
+        require_keys(payload, ("token",))
+        token = payload["token"]
         self.token = token
         self.session.headers.update({"Authorization": f"Bearer {token}"})
         return token
 
-    def read_inbox(self) -> list[dict[str, object]]:
+    def read_inbox(self) -> list[MessageSummary]:
         """Fetch the list of messages in the inbox."""
         self._require_login()
         payload = self._read_json("GET", "/messages")
-        return payload.get("hydra:member", [])
+        messages = require_member_list(payload)
+        for message in messages:
+            require_keys(message, MESSAGE_SUMMARY_KEYS, body=payload)
+        return messages
 
-    def read_message(self, message_id: str) -> dict[str, object]:
+    def read_message(self, message_id: str) -> Message:
         """Fetch the full content of a specific message."""
         self._require_login()
-        return self._read_json("GET", f"/messages/{message_id}")
+        payload = self._read_json("GET", f"/messages/{message_id}")
+        require_keys(payload, MESSAGE_DETAIL_KEYS)
+        return payload
 
     def _require_login(self) -> None:
         if not self.token:

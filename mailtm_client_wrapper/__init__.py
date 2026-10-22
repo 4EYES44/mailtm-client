@@ -12,6 +12,7 @@ from .exceptions import (
     MailTMWaitTimeoutError,
 )
 from .extract import extract_between
+from .models import Message, MessageSummary
 
 __all__ = [
     "MailTMClient",
@@ -26,4 +27,6 @@ __all__ = [
     "MailTMResponseError",
     "MailTMWaitTimeoutError",
     "extract_between",
+    "Message",
+    "MessageSummary",
 ]
