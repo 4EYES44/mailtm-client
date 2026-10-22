@@ -72,7 +72,7 @@ def _positive_duration(value: object, name: str) -> int | float:
         raise ValueError(message)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(message)
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise ValueError(message)
     return value
 
@@ -82,7 +82,7 @@ def _positive_seconds(value: object) -> None:
         raise ValueError(_TIMEOUT_ERROR)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(_TIMEOUT_ERROR)
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise ValueError(_TIMEOUT_ERROR)
 
 

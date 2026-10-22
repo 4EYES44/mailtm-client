@@ -202,6 +202,12 @@ INVALID_TIMEOUTS = [
     ((1,), TypeError),
     ((1, 2, 3), TypeError),
     ([1.0, 2.0], TypeError),
+    (float("inf"), ValueError),
+    (float("-inf"), ValueError),
+    (float("nan"), ValueError),
+    ((float("inf"), 5), ValueError),
+    ((5, float("nan")), ValueError),
+    ((float("-inf"), 1), ValueError),
 ]
 
 

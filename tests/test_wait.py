@@ -222,6 +222,12 @@ def test_waiting_before_login_makes_no_request(mocked_responses, fake_clock):
         ("poll_interval", None, ValueError),
         ("poll_interval", True, TypeError),
         ("poll_interval", False, TypeError),
+        ("timeout", float("inf"), ValueError),
+        ("timeout", float("-inf"), ValueError),
+        ("timeout", float("nan"), ValueError),
+        ("poll_interval", float("inf"), ValueError),
+        ("poll_interval", float("-inf"), ValueError),
+        ("poll_interval", float("nan"), ValueError),
     ],
 )
 def test_non_positive_or_non_numeric_wait_timing_is_rejected(
