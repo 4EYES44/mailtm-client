@@ -3,7 +3,6 @@
 import pytest
 import requests
 import responses
-
 from fixtures import (
     ACCOUNT,
     BASE_URL,
@@ -15,6 +14,7 @@ from fixtures import (
     TOKEN,
     _calls_for,
 )
+
 from mailtm_client_wrapper import (
     MailTMAPIError,
     MailTMAuthError,

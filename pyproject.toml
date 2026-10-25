@@ -33,7 +33,11 @@ dependencies = [
 dev = [
     "pytest",
     "responses",
+    "ruff>=0.17.2",
 ]
+
+[tool.ruff]
+target-version = "py312"
 
 [tool.pytest.ini_options]
 markers = [

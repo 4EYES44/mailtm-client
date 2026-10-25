@@ -1,6 +1,7 @@
 import pytest
 import requests
 import responses
+from fixtures import BASE_URL, ERROR_401, ERROR_404, ERROR_422
 
 from mailtm_client_wrapper import (
     MailTMAPIError,
@@ -15,7 +16,6 @@ from mailtm_client_wrapper import (
     MailTMTimeoutError,
     MailTMWaitTimeoutError,
 )
-from fixtures import BASE_URL, ERROR_401, ERROR_404, ERROR_422
 
 
 def test_library_errors_share_one_root_and_keep_their_branches():

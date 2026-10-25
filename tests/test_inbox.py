@@ -2,9 +2,9 @@
 
 import pytest
 import responses
+from fixtures import BASE_URL, _message_gets, _summary
 from responses import matchers
 
-from fixtures import BASE_URL, _message_gets, _summary
 from mailtm_client_wrapper import MailTMServerError
 
 

@@ -29,7 +29,6 @@ from .validation import (
     require_member_list,
 )
 
-
 type _Timeout = int | float | tuple[int | float, int | float]
 
 _TIMEOUT_ERROR = "timeout must be a positive number of seconds or a (connect, read) pair"
@@ -199,7 +198,7 @@ def _error_for_status(response: requests.Response) -> MailTMAPIError:
     else:
         error = MailTMAPIError(message, status_code=status_code, body=body)
     # Private copy so the retry loop does not read the requests response again.
-    setattr(error, "_retry_after", retry_after)
+    error._retry_after = retry_after
     return error
 
 
@@ -437,8 +436,8 @@ class MailTMClient:
         self,
         predicate: Callable[[MessageSummary], object] | None = None,
         *,
-        timeout: int | float = 60.0,
-        poll_interval: int | float = 3.0,
+        timeout: float = 60.0,
+        poll_interval: float = 3.0,
         exclude_ids: Collection[str] = (),
     ) -> Message:
         """Poll the inbox until a matching message arrives and return it in full.

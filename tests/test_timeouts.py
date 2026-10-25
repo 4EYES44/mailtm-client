@@ -4,7 +4,6 @@ import pytest
 import requests
 import responses
 import urllib3
-
 from fixtures import (
     ACCOUNT,
     BASE_URL,
@@ -14,6 +13,7 @@ from fixtures import (
     TOKEN,
     _recorded_timeout,
 )
+
 from mailtm_client_wrapper import (
     MailTMClient,
     MailTMConnectionError,

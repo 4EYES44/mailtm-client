@@ -4,9 +4,14 @@ from typing import get_type_hints
 
 import pytest
 import responses
-
 from fixtures import ACCOUNT, BASE_URL, MESSAGE_DETAIL, MESSAGE_LIST_ITEM, TOKEN
-from mailtm_client_wrapper import MailTMClient, MailTMResponseError, Message, MessageSummary
+
+from mailtm_client_wrapper import (
+    MailTMClient,
+    MailTMResponseError,
+    Message,
+    MessageSummary,
+)
 
 SUMMARY_KEYS = ("id", "from", "subject", "createdAt", "seen", "hasAttachments")
 DETAIL_KEYS = SUMMARY_KEYS + ("text", "html")

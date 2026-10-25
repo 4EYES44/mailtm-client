@@ -15,19 +15,19 @@ from .extract import extract_between
 from .models import Message, MessageSummary
 
 __all__ = [
-    "MailTMClient",
-    "RetryPolicy",
-    "MailTMError",
-    "MailTMTimeoutError",
-    "MailTMConnectionError",
     "MailTMAPIError",
     "MailTMAuthError",
+    "MailTMClient",
+    "MailTMConnectionError",
+    "MailTMError",
     "MailTMNotAuthenticatedError",
     "MailTMRateLimitError",
-    "MailTMServerError",
     "MailTMResponseError",
+    "MailTMServerError",
+    "MailTMTimeoutError",
     "MailTMWaitTimeoutError",
-    "extract_between",
     "Message",
     "MessageSummary",
+    "RetryPolicy",
+    "extract_between",
 ]

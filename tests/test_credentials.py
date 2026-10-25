@@ -2,8 +2,8 @@ import random
 import string
 
 import responses
-
 from fixtures import BASE_URL, DOMAIN_COLLECTION
+
 from mailtm_client_wrapper import MailTMClient
 
 LOCAL_PART_CHARACTERS = string.ascii_lowercase + string.digits

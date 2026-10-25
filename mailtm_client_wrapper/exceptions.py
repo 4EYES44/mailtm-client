@@ -52,7 +52,7 @@ class MailTMRateLimitError(MailTMAPIError):
         *,
         status_code: int | None = None,
         body: object = None,
-        retry_after: int | float | None = None,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message, status_code=status_code, body=body)
         self.retry_after = retry_after

@@ -1,7 +1,7 @@
 import pytest
 import responses
-
 from fixtures import BASE_URL, TOKEN
+
 from mailtm_client_wrapper import MailTMClient, _timing
 
 

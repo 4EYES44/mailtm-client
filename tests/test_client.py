@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import requests
+
 from mailtm_client_wrapper import MailTMClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,7 +38,9 @@ def test_pytest_and_responses_stay_out_of_runtime_dependencies():
 
     assert any(item.startswith("requests") for item in runtime)
     assert all(not item.startswith(("pytest", "responses")) for item in runtime)
-    assert pyproject["dependency-groups"]["dev"] == ["pytest", "responses"]
+    dev = pyproject["dependency-groups"]["dev"]
+    assert any(item.startswith("pytest") for item in dev)
+    assert any(item.startswith("responses") for item in dev)
 
 
 def test_client_init():
