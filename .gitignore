@@ -8,3 +8,7 @@ build/
 .venv/
 venv/
 .DS_Store
+AGENTS.md
+fork.md
+docs/
+.playwright-mcp/
